@@ -3167,10 +3167,10 @@ class App(tk.Tk):
         self.tree.heading("concentration", text="Conc.")
         self.tree.heading("locations", text="Location")
         
-        self.tree.column("brand", width=120, anchor="w")
-        self.tree.column("name", width=180, anchor="w")
-        self.tree.column("concentration", width=60, anchor="w")
-        self.tree.column("locations", width=120, anchor="w")
+        self.tree.column("brand", width=80, anchor="w")
+        self.tree.column("name", width=240, anchor="w")
+        self.tree.column("concentration", width=60, stretch=False, anchor="w")
+        self.tree.column("locations", width=100, anchor="w")
 
         yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=yscroll.set)
