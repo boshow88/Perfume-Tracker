@@ -3138,11 +3138,9 @@ class App(tk.Tk):
             "name": True,       # Required, cannot hide
             "concentration": True,
             "locations": True,
-            "tags": True,
-            "state": True,
         }
         
-        all_columns = ("brand", "name", "concentration", "locations", "tags", "state")
+        all_columns = ("brand", "name", "concentration", "locations")
         self.tree = ttk.Treeview(
             tree_frame,
             columns=all_columns,
@@ -3154,15 +3152,11 @@ class App(tk.Tk):
         self.tree.heading("name", text="Name")
         self.tree.heading("concentration", text="Conc.")
         self.tree.heading("locations", text="Location")
-        self.tree.heading("tags", text="Tags")
-        self.tree.heading("state", text="State")
         
         self.tree.column("brand", width=120, anchor="w")
         self.tree.column("name", width=180, anchor="w")
         self.tree.column("concentration", width=60, anchor="w")
         self.tree.column("locations", width=120, anchor="w")
-        self.tree.column("tags", width=100, anchor="w")
-        self.tree.column("state", width=100, anchor="w")
 
         yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=yscroll.set)
@@ -3214,7 +3208,11 @@ class App(tk.Tk):
 
         # Title
         self.detail_title = ttk.Label(right, text="(no selection)", style="Panel.TLabel", font=("TkDefaultFont", 12, "bold"))
-        self.detail_title.pack(fill="x", padx=10, pady=(0, 6), anchor="w")
+        self.detail_title.pack(fill="x", padx=10, pady=(0, 2), anchor="w")
+        
+        # State (derived from events)
+        self.state_label = ttk.Label(right, text="", style="Muted.TLabel")
+        self.state_label.pack(fill="x", padx=10, pady=(0, 6), anchor="w")
 
         # Canvas frame for scrollable content (using pack)
         canvas_frame = ttk.Frame(right, style="Panel.TFrame")
@@ -3244,13 +3242,18 @@ class App(tk.Tk):
         # Bind canvas resize to update scrollable frame width
         self.detail_canvas.bind("<Configure>", self._on_canvas_configure)
 
-        # Tags section (above vote blocks) - inside scrollable frame
-        tags_section = ttk.Frame(self.scrollable_detail_frame, style="Panel.TFrame")
-        tags_section.pack(fill="x", padx=(0, 20), pady=(0, 12))
-        
-        ttk.Label(tags_section, text="Tags:", style="Panel.TLabel", font=("TkDefaultFont", 10, "bold")).pack(side="left", padx=(0, 8))
-        self.tags_display_frame = ttk.Frame(tags_section, style="Panel.TFrame")
-        self.tags_display_frame.pack(side="left", fill="x", expand=True)
+        # Tags section (clickable to expand) - inside scrollable frame
+        self.tags_label = tk.Label(
+            self.scrollable_detail_frame, 
+            text="(No tags)", 
+            fg=COLORS["muted"], 
+            bg=COLORS["panel"],
+            cursor="hand2",
+            anchor="w"
+        )
+        self.tags_label.pack(fill="x", padx=(0, 20), pady=(0, 12), anchor="w")
+        self.tags_label.bind("<Button-1>", self._show_tags_popup)
+        self.current_tags = []  # Store current tags for popup
         
         # Vote blocks (collapsible) - inside scrollable frame
         # Add right padding to avoid content going under scrollbar
@@ -3460,14 +3463,11 @@ class App(tk.Tk):
             # Get locations (Available At)
             locations_display = ", ".join(self.get_outlet_display(oid) for oid in p.outlet_ids) if p.outlet_ids else ""
             
-            # Get tags
-            tags_display = ", ".join(tag_names) if tag_names else ""
-            
             self.tree.insert(
                 "",
                 "end",
                 iid=p.id,
-                values=(brand_display, p.name, conc_display, locations_display, tags_display, state),
+                values=(brand_display, p.name, conc_display, locations_display),
             )
             ids.append(p.id)
         
@@ -3687,20 +3687,25 @@ class App(tk.Tk):
         brand_display = self.get_brand_name(p.brand_id)
         self.detail_title.config(text=f"{brand_display} – {p.name}")
         
-        # tags
-        for widget in self.tags_display_frame.winfo_children():
-            widget.destroy()
+        # State (derived from events)
+        tag_names_for_state = [self.get_tag_name(tid) for tid in p.tag_ids]
+        state, _ = derive_state(p, tag_names_for_state)
+        self.state_label.config(text=state if state else "New")
         
-        # V2: Use tag_ids lookup
+        # tags - display as gray text, click to expand
         tag_names = [self.get_tag_name(tid) for tid in p.tag_ids]
+        self.current_tags = tag_names
+        
         if not tag_names:
-            ttk.Label(self.tags_display_frame, text="(No tags)", style="Muted.TLabel").pack(side="left")
+            self.tags_label.config(text="(No tags)", cursor="arrow")
         else:
-            for tag in tag_names:
-                tag_label = tk.Label(self.tags_display_frame, text=f"[{tag}]", 
-                                    bg=COLORS["accent"], fg=COLORS["bg"], 
-                                    padx=6, pady=2)
-                tag_label.pack(side="left", padx=(0, 4))
+            # Show summary: first few tags + count if more
+            max_display = 3
+            if len(tag_names) <= max_display:
+                display_text = ", ".join(tag_names)
+            else:
+                display_text = ", ".join(tag_names[:max_display]) + f" (+{len(tag_names) - max_display} more)"
+            self.tags_label.config(text=display_text, cursor="hand2")
 
         # links
         for widget in self.links_display_frame.winfo_children():
@@ -3742,6 +3747,82 @@ class App(tk.Tk):
                 expanded=self.expanded_sections.get(block_name, False),
             )
     
+    def _show_tags_popup(self, event=None):
+        """Show popup window with all tags listed vertically"""
+        if not self.current_tags:
+            return
+        
+        # Create popup window
+        popup = tk.Toplevel(self)
+        popup.title("Tags")
+        popup.configure(bg=COLORS["panel"])
+        popup.transient(self)
+        
+        # Create container frame
+        container = ttk.Frame(popup, style="Panel.TFrame")
+        container.pack(fill="both", expand=True)
+        
+        # Create scrollable frame
+        canvas = tk.Canvas(container, bg=COLORS["panel"], highlightthickness=0, width=230)
+        scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas, style="Panel.TFrame")
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        # Add tags vertically
+        for tag in self.current_tags:
+            tag_label = tk.Label(
+                scrollable_frame,
+                text=f"• {tag}",
+                bg=COLORS["panel"],
+                fg=COLORS["text"],
+                anchor="w",
+                padx=10,
+                pady=4
+            )
+            tag_label.pack(fill="x", anchor="w")
+        
+        # Update to calculate content size
+        scrollable_frame.update_idletasks()
+        content_height = scrollable_frame.winfo_reqheight()
+        max_height = 300
+        
+        # Determine if scrollbar is needed
+        if content_height > max_height:
+            # Need scrollbar
+            canvas.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
+            scrollbar.pack(side="right", fill="y", pady=10, padx=(0, 5))
+            popup.geometry(f"250x{max_height}")
+            
+            # Configure scroll region
+            scrollable_frame.bind(
+                "<Configure>",
+                lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+            )
+            
+            # Mouse wheel scrolling
+            def on_mousewheel(event):
+                canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            
+            canvas.bind("<MouseWheel>", on_mousewheel)
+            scrollable_frame.bind("<MouseWheel>", on_mousewheel)
+            for child in scrollable_frame.winfo_children():
+                child.bind("<MouseWheel>", on_mousewheel)
+        else:
+            # No scrollbar needed - fit to content
+            canvas.pack(fill="both", expand=True, padx=10, pady=10)
+            popup.geometry(f"250x{content_height + 20}")
+        
+        # Position popup near the tags label
+        x = self.tags_label.winfo_rootx()
+        y = self.tags_label.winfo_rooty() + self.tags_label.winfo_height()
+        popup.geometry(f"+{x}+{y}")
+        
+        # Close on Escape
+        popup.bind("<Escape>", lambda e: popup.destroy())
+        popup.focus_set()
+    
     def _open_url(self, url: str):
         """Open URL in default browser"""
         import webbrowser
@@ -3771,8 +3852,6 @@ class App(tk.Tk):
         optional_cols = [
             ("concentration", "Concentration"),
             ("locations", "Location"),
-            ("tags", "Tags"),
-            ("state", "State"),
         ]
         
         for col_id, col_name in optional_cols:
@@ -4676,6 +4755,7 @@ class App(tk.Tk):
         self.perfumes = [x for x in self.perfumes if x.id != pid]
         self.tree.delete(*self.tree.get_children())
         self.detail_title.config(text="(no selection)")
+        self.state_label.config(text="")
         self.list_my_notes.delete(0, "end")
         self.list_other_notes.delete(0, "end")
         for block in self.vote_blocks.values():

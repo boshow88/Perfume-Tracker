@@ -60,7 +60,8 @@ python perfume_tracker.py
 │                         │ [Smell] [Skin]             │
 │ ┌─────────────────────┐ │                            │
 │ │   Perfume Treeview  │ │ Brand - Name               │
-│ │                     │ │ [Tag1] [Tag2] [Tag3]       │
+│ │                     │ │ State (gray, derived)      │
+│ │                     │ │ Tag1, Tag2 (+N more)       │
 │ │                     │ │                            │
 │ │                     │ │ ▶ Rating    ████████ 4.2   │
 │ │                     │ │ ▶ Longevity ████     3.1   │
@@ -93,9 +94,13 @@ python perfume_tracker.py
 
 ### Treeview Columns
 - **Always visible**: Brand, Name
-- **Toggleable**: Concentration, Location, Tags, State
+- **Toggleable**: Concentration, Location
 - Right-click on header to toggle column visibility
 - Double-click a perfume to open the Info edit dialog
+
+### Right Panel Detail
+- **State**: Displayed as gray text below the title (derived from events)
+- **Tags**: Displayed as gray text, click to expand popup with full tag list
 
 ---
 
