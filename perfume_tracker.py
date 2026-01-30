@@ -164,6 +164,19 @@ class Event:
 
 
 @dataclass
+class Note:
+    """A note with title and content"""
+    id: str
+    title: str = "Note"  # Default title
+    content: str = ""
+    created_at: int = field(default_factory=now_ts)
+
+
+# Common note titles for quick selection
+NOTE_QUICK_TITLES = ["My Notes", "Review"]
+
+
+@dataclass
 class Perfume:
     id: str
     name: str
@@ -178,8 +191,7 @@ class Perfume:
 
     events: List[Event] = field(default_factory=list)
 
-    notes_my: List[str] = field(default_factory=list)
-    notes_others: List[str] = field(default_factory=list)
+    notes: List[Note] = field(default_factory=list)  # List of Note objects
     links: List[Dict] = field(default_factory=list)  # [{"label": "...", "url": "..."}, ...]
 
     # Fragrantica raw vote counts (optional block)
@@ -233,6 +245,7 @@ def load_db() -> List[Perfume]:
     perfumes: List[Perfume] = []
     for p in raw.get("perfumes", []):
         events = [Event(**e) for e in p.get("events", [])]
+        notes = [Note(**n) for n in p.get("notes", [])]
         perfume = Perfume(
             id=p["id"],
             brand=p.get("brand", ""),
@@ -241,8 +254,7 @@ def load_db() -> List[Perfume]:
             created_at=p.get("created_at", now_ts()),
             updated_at=p.get("updated_at", now_ts()),
             events=events,
-            notes_my=p.get("notes_my", []),
-            notes_others=p.get("notes_others", []),
+            notes=notes,
             fragrantica=p.get("fragrantica", {}),
             my_votes=p.get("my_votes", {}),
             # V2 fields
@@ -262,6 +274,7 @@ def save_db(perfumes: List[Perfume]):
     def perfume_to_dict(p: Perfume) -> Dict:
         d = asdict(p)
         d["events"] = [asdict(e) for e in p.events]
+        d["notes"] = [asdict(n) for n in p.notes]
         return d
 
     data = {"version": 2, "updated_at": now_ts(), "perfumes": [perfume_to_dict(p) for p in perfumes]}
@@ -319,6 +332,7 @@ def load_app_data() -> AppData:
     raw_perfumes = raw.get("perfumes", [])
     for p_raw in raw_perfumes:
         events = [Event(**e) for e in p_raw.get("events", [])]
+        notes = [Note(**n) for n in p_raw.get("notes", [])]
         perfume = Perfume(
             id=p_raw["id"],
             name=p_raw.get("name", ""),
@@ -329,8 +343,7 @@ def load_app_data() -> AppData:
             created_at=p_raw.get("created_at", now_ts()),
             updated_at=p_raw.get("updated_at", now_ts()),
             events=events,
-            notes_my=p_raw.get("notes_my", []),
-            notes_others=p_raw.get("notes_others", []),
+            notes=notes,
             links=p_raw.get("links", []),
             fragrantica=p_raw.get("fragrantica", {}),
             my_votes=p_raw.get("my_votes", {}),
@@ -388,6 +401,7 @@ def save_app_data(app_data: AppData):
     def perfume_to_dict(p: Perfume) -> Dict:
         d = asdict(p)
         d["events"] = [asdict(e) for e in p.events]
+        d["notes"] = [asdict(n) for n in p.notes]
         return d
     
     def outlet_to_dict(o: OutletInfo) -> Dict:
@@ -3179,7 +3193,7 @@ class App(tk.Tk):
         
         # Use expand=True to distribute buttons evenly
         ttk.Button(right_btn_frame, text="Info", command=self.ui_edit_info).pack(side="left", fill="x", expand=True, padx=(0, 2))
-        ttk.Button(right_btn_frame, text="Notes", command=self.ui_edit_notes).pack(side="left", fill="x", expand=True, padx=(0, 2))
+        ttk.Button(right_btn_frame, text="Memo", command=self.ui_edit_notes).pack(side="left", fill="x", expand=True, padx=(0, 2))
         ttk.Button(right_btn_frame, text="Events", command=self.ui_edit_events).pack(side="left", fill="x", expand=True, padx=(0, 2))
         ttk.Button(right_btn_frame, text="Fragrantica", command=self.ui_edit_fragrantica).pack(side="left", fill="x", expand=True)
         
@@ -3255,6 +3269,21 @@ class App(tk.Tk):
         self.tags_label.bind("<Button-1>", self._show_tags_popup)
         self.current_tags = []  # Store current tags for popup
         
+        # Fragrantica section title (clickable if URL exists)
+        self.fragrantica_title_frame = ttk.Frame(self.scrollable_detail_frame, style="Panel.TFrame")
+        self.fragrantica_title_frame.pack(fill="x", padx=(0, 20), pady=(8, 4))
+        
+        self.fragrantica_title = tk.Label(
+            self.fragrantica_title_frame, 
+            text="Fragrantica", 
+            fg=COLORS["accent"], 
+            bg=COLORS["panel"],
+            font=("TkDefaultFont", 10, "bold"),
+            anchor="w"
+        )
+        self.fragrantica_title.pack(side="left")
+        self.fragrantica_url = ""  # Store current URL
+        
         # Vote blocks (collapsible) - inside scrollable frame
         # Add right padding to avoid content going under scrollbar
         self.bars_frame = ttk.Frame(self.scrollable_detail_frame, style="Panel.TFrame")
@@ -3296,15 +3325,9 @@ class App(tk.Tk):
         self.links_display_frame.pack(fill="x", padx=(0, 20))
 
         # Notes (inside scrollable frame)
-        ttk.Label(self.scrollable_detail_frame, text="My Notes", style="Panel.TLabel").pack(anchor="w", padx=(0, 20), pady=(14, 4))
-        self.list_my_notes = tk.Listbox(self.scrollable_detail_frame, height=5)
-        self.list_my_notes.pack(fill="x", padx=(0, 20))
-        self.list_my_notes.bind("<Double-1>", lambda e: self.ui_remove_note(which="my"))  # dblclick remove
-
-        ttk.Label(self.scrollable_detail_frame, text="Others' Notes", style="Panel.TLabel").pack(anchor="w", padx=(0, 20), pady=(14, 4))
-        self.list_other_notes = tk.Listbox(self.scrollable_detail_frame, height=5)
-        self.list_other_notes.pack(fill="x", padx=(0, 20))
-        self.list_other_notes.bind("<Double-1>", lambda e: self.ui_remove_note(which="others"))
+        ttk.Label(self.scrollable_detail_frame, text="Notes", style="Panel.TLabel").pack(anchor="w", padx=(0, 20), pady=(14, 4))
+        self.notes_display_frame = ttk.Frame(self.scrollable_detail_frame, style="Panel.TFrame")
+        self.notes_display_frame.pack(fill="x", padx=(0, 20))
 
 
         # Context menu on list
@@ -3440,7 +3463,8 @@ class App(tk.Tk):
                 # V2: use brand_id and tag_ids lookup for search
                 brand_name = self.get_brand_name(p.brand_id)
                 tag_names = [self.get_tag_name(tid) for tid in p.tag_ids]
-                blob = " ".join([brand_name, p.name, " ".join(tag_names), " ".join(p.notes_my), " ".join(p.notes_others)]).lower()
+                note_contents = [n.title + " " + n.content for n in p.notes]
+                blob = " ".join([brand_name, p.name, " ".join(tag_names), " ".join(note_contents)]).lower()
                 if q not in blob:
                     continue
             
@@ -3726,18 +3750,78 @@ class App(tk.Tk):
                 link_label.bind("<Button-1>", lambda e, u=url: self._open_url(u))
 
         # notes
-        self.list_my_notes.delete(0, "end")
-        for s in p.notes_my:
-            self.list_my_notes.insert("end", s)
-
-        self.list_other_notes.delete(0, "end")
-        for s in p.notes_others:
-            self.list_other_notes.insert("end", s)
+        for widget in self.notes_display_frame.winfo_children():
+            widget.destroy()
+        
+        if not p.notes:
+            ttk.Label(self.notes_display_frame, text="(No notes)", style="Muted.TLabel").pack(anchor="w")
+        else:
+            max_lines = 6  # Max lines to show before "more"
+            max_chars = 300  # Max characters to show before "more"
+            
+            for note in p.notes:
+                note_frame = ttk.Frame(self.notes_display_frame, style="Panel.TFrame")
+                note_frame.pack(fill="x", anchor="w", pady=(8, 0))
+                
+                # Title on its own line
+                title_label = tk.Label(note_frame, text=note.title, 
+                                      fg=COLORS["accent"], bg=COLORS["panel"],
+                                      font=("TkDefaultFont", 9, "bold"), anchor="w")
+                title_label.pack(fill="x")
+                
+                # Content - preserve newlines, auto-wrap long lines
+                content = note.content
+                lines = content.split("\n")
+                has_more = len(lines) > max_lines or len(content) > max_chars
+                
+                if has_more:
+                    # Truncate content
+                    if len(lines) > max_lines:
+                        preview = "\n".join(lines[:max_lines]) + "..."
+                    elif len(content) > max_chars:
+                        preview = content[:max_chars] + "..."
+                    else:
+                        preview = content
+                else:
+                    preview = content
+                
+                # Use Label with wraplength for auto-wrap (350px width)
+                content_label = tk.Label(note_frame, text=preview, 
+                                       fg=COLORS["text"], bg=COLORS["panel"],
+                                       anchor="nw", justify="left",
+                                       wraplength=350,
+                                       cursor="hand2" if has_more else "arrow")
+                content_label.pack(fill="x", anchor="w")
+                
+                if has_more:
+                    content_label.bind("<Button-1>", lambda e, n=note: self._show_note_popup(n))
+                    more_label = tk.Label(note_frame, text="[more]", 
+                                        fg=COLORS["muted"], bg=COLORS["panel"],
+                                        cursor="hand2", anchor="w")
+                    more_label.pack(anchor="w")
+                    more_label.bind("<Button-1>", lambda e, n=note: self._show_note_popup(n))
 
         # vote blocks (Fragrantica + my votes)
         fr = (p.fragrantica or {})
         fr_blocks = {k: fr.get(k, {}) for k, _, _ in VOTE_BLOCKS}
         my = (p.my_votes or {})
+        
+        # Update Fragrantica title with URL if available
+        self.fragrantica_url = fr.get("url", "")
+        if self.fragrantica_url:
+            self.fragrantica_title.config(
+                text="Fragrantica ↗", 
+                cursor="hand2",
+                fg=COLORS["accent"]
+            )
+            self.fragrantica_title.bind("<Button-1>", lambda e: self._open_url(self.fragrantica_url))
+        else:
+            self.fragrantica_title.config(
+                text="Fragrantica", 
+                cursor="arrow",
+                fg=COLORS["accent"]
+            )
+            self.fragrantica_title.unbind("<Button-1>")
 
         for block_name, keys, _title in VOTE_BLOCKS:
             self.vote_blocks[block_name].set_data(
@@ -3746,6 +3830,41 @@ class App(tk.Tk):
                 my_votes=my.get(MY_PREFIX + block_name, {}) or {},
                 expanded=self.expanded_sections.get(block_name, False),
             )
+    
+    def _show_note_popup(self, note: Note):
+        """Show popup window with full note content"""
+        popup = tk.Toplevel(self)
+        popup.title(note.title)
+        popup.geometry("400x300")
+        popup.configure(bg=COLORS["panel"])
+        popup.transient(self)
+        
+        # Title
+        title_label = tk.Label(popup, text=note.title, 
+                              font=("TkDefaultFont", 11, "bold"),
+                              fg=COLORS["accent"], bg=COLORS["panel"])
+        title_label.pack(anchor="w", padx=15, pady=(15, 5))
+        
+        # Content with scrollbar
+        text_frame = ttk.Frame(popup, style="Panel.TFrame")
+        text_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
+        
+        text_widget = tk.Text(text_frame, wrap="word", 
+                             bg=COLORS["panel"], fg=COLORS["text"],
+                             font=("TkDefaultFont", 10),
+                             relief="flat", padx=5, pady=5)
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+        
+        scrollbar.pack(side="right", fill="y")
+        text_widget.pack(side="left", fill="both", expand=True)
+        
+        text_widget.insert("1.0", note.content)
+        text_widget.config(state="disabled")  # Read-only
+        
+        # Close on Escape
+        popup.bind("<Escape>", lambda e: popup.destroy())
+        popup.focus_set()
     
     def _show_tags_popup(self, event=None):
         """Show popup window with all tags listed vertically"""
@@ -4030,14 +4149,20 @@ class App(tk.Tk):
         conc_cb = ttk.Combobox(conc_frame, textvariable=var_conc, values=conc_names, width=15, state="readonly")
         conc_cb.pack(side="left", padx=(4, 0))
 
-        # === Location (pool mode) ===
-        loc_frame = ttk.LabelFrame(frm, text="Location (double-click to remove)", style="TLabelframe")
+        # === Location ===
+        loc_frame = ttk.LabelFrame(frm, text="Location", style="TLabelframe")
         loc_frame.pack(fill="both", expand=True, pady=(0, 8))
         
         selected_loc_ids = list(perfume.outlet_ids) if perfume else []
         
-        loc_listbox = tk.Listbox(loc_frame, height=3)
-        loc_listbox.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+        loc_list_frame = ttk.Frame(loc_frame, style="TFrame")
+        loc_list_frame.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+        
+        loc_listbox = tk.Listbox(loc_list_frame, height=3)
+        loc_scrollbar = ttk.Scrollbar(loc_list_frame, orient="vertical", command=loc_listbox.yview)
+        loc_listbox.configure(yscrollcommand=loc_scrollbar.set)
+        loc_listbox.pack(side="left", fill="both", expand=True)
+        loc_scrollbar.pack(side="right", fill="y")
         
         def refresh_loc_listbox():
             loc_listbox.delete(0, "end")
@@ -4046,20 +4171,13 @@ class App(tk.Tk):
         
         refresh_loc_listbox()
         
-        def remove_loc(event):
-            sel = loc_listbox.curselection()
-            if sel:
-                selected_loc_ids.pop(sel[0])
-                refresh_loc_listbox()
-        
-        loc_listbox.bind("<Double-1>", remove_loc)
-        
+        # Add location input
         loc_add_frame = ttk.Frame(loc_frame, style="TFrame")
         loc_add_frame.pack(fill="x", padx=8, pady=4)
         
         loc_names = self.get_all_outlet_names()
         var_new_loc = tk.StringVar()
-        loc_entry = ttk.Combobox(loc_add_frame, textvariable=var_new_loc, width=25)
+        loc_entry = ttk.Combobox(loc_add_frame, textvariable=var_new_loc, width=20)
         make_combobox_searchable(loc_entry, loc_names)
         loc_entry.pack(side="left")
         
@@ -4073,16 +4191,48 @@ class App(tk.Tk):
                 refresh_loc_listbox()
             var_new_loc.set("")
         
-        ttk.Button(loc_add_frame, text="Add", command=add_location, width=6).pack(side="left", padx=(4, 0))
+        def delete_location():
+            sel = loc_listbox.curselection()
+            if sel:
+                selected_loc_ids.pop(sel[0])
+                refresh_loc_listbox()
+        
+        def move_loc_up():
+            sel = loc_listbox.curselection()
+            if sel and sel[0] > 0:
+                idx = sel[0]
+                selected_loc_ids[idx], selected_loc_ids[idx-1] = selected_loc_ids[idx-1], selected_loc_ids[idx]
+                refresh_loc_listbox()
+                loc_listbox.selection_set(idx-1)
+        
+        def move_loc_down():
+            sel = loc_listbox.curselection()
+            if sel and sel[0] < len(selected_loc_ids) - 1:
+                idx = sel[0]
+                selected_loc_ids[idx], selected_loc_ids[idx+1] = selected_loc_ids[idx+1], selected_loc_ids[idx]
+                refresh_loc_listbox()
+                loc_listbox.selection_set(idx+1)
+        
+        # Button bar
+        ttk.Button(loc_add_frame, text="Add", command=add_location, width=5).pack(side="left", padx=(4, 0))
+        ttk.Button(loc_add_frame, text="Del", command=delete_location, width=4).pack(side="left", padx=(4, 0))
+        ttk.Button(loc_add_frame, text="↑", command=move_loc_up, width=2).pack(side="left", padx=(8, 0))
+        ttk.Button(loc_add_frame, text="↓", command=move_loc_down, width=2).pack(side="left", padx=(2, 0))
 
-        # === Tags (pool mode) ===
-        tags_frame = ttk.LabelFrame(frm, text="Tags (double-click to remove)", style="TLabelframe")
+        # === Tags ===
+        tags_frame = ttk.LabelFrame(frm, text="Tags", style="TLabelframe")
         tags_frame.pack(fill="both", expand=True, pady=(0, 8))
         
         selected_tag_names = [self.get_tag_name(tid) for tid in perfume.tag_ids] if perfume else []
         
-        tag_listbox = tk.Listbox(tags_frame, height=3)
-        tag_listbox.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+        tag_list_frame = ttk.Frame(tags_frame, style="TFrame")
+        tag_list_frame.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+        
+        tag_listbox = tk.Listbox(tag_list_frame, height=3)
+        tag_scrollbar = ttk.Scrollbar(tag_list_frame, orient="vertical", command=tag_listbox.yview)
+        tag_listbox.configure(yscrollcommand=tag_scrollbar.set)
+        tag_listbox.pack(side="left", fill="both", expand=True)
+        tag_scrollbar.pack(side="right", fill="y")
         
         def refresh_tag_listbox():
             tag_listbox.delete(0, "end")
@@ -4091,20 +4241,13 @@ class App(tk.Tk):
         
         refresh_tag_listbox()
         
-        def remove_tag(event):
-            sel = tag_listbox.curselection()
-            if sel:
-                selected_tag_names.pop(sel[0])
-                refresh_tag_listbox()
-        
-        tag_listbox.bind("<Double-1>", remove_tag)
-        
+        # Add tag input
         tag_add_frame = ttk.Frame(tags_frame, style="TFrame")
         tag_add_frame.pack(fill="x", padx=8, pady=4)
         
         existing_tag_names = self.get_all_tag_names()
         var_new_tag = tk.StringVar()
-        tag_entry = ttk.Combobox(tag_add_frame, textvariable=var_new_tag, width=25)
+        tag_entry = ttk.Combobox(tag_add_frame, textvariable=var_new_tag, width=20)
         make_combobox_searchable(tag_entry, existing_tag_names)
         tag_entry.pack(side="left")
         
@@ -4117,7 +4260,33 @@ class App(tk.Tk):
                 refresh_tag_listbox()
             var_new_tag.set("")
         
-        ttk.Button(tag_add_frame, text="Add", command=add_tag, width=6).pack(side="left", padx=(4, 0))
+        def delete_tag():
+            sel = tag_listbox.curselection()
+            if sel:
+                selected_tag_names.pop(sel[0])
+                refresh_tag_listbox()
+        
+        def move_tag_up():
+            sel = tag_listbox.curselection()
+            if sel and sel[0] > 0:
+                idx = sel[0]
+                selected_tag_names[idx], selected_tag_names[idx-1] = selected_tag_names[idx-1], selected_tag_names[idx]
+                refresh_tag_listbox()
+                tag_listbox.selection_set(idx-1)
+        
+        def move_tag_down():
+            sel = tag_listbox.curselection()
+            if sel and sel[0] < len(selected_tag_names) - 1:
+                idx = sel[0]
+                selected_tag_names[idx], selected_tag_names[idx+1] = selected_tag_names[idx+1], selected_tag_names[idx]
+                refresh_tag_listbox()
+                tag_listbox.selection_set(idx+1)
+        
+        # Button bar
+        ttk.Button(tag_add_frame, text="Add", command=add_tag, width=5).pack(side="left", padx=(4, 0))
+        ttk.Button(tag_add_frame, text="Del", command=delete_tag, width=4).pack(side="left", padx=(4, 0))
+        ttk.Button(tag_add_frame, text="↑", command=move_tag_up, width=2).pack(side="left", padx=(8, 0))
+        ttk.Button(tag_add_frame, text="↓", command=move_tag_down, width=2).pack(side="left", padx=(2, 0))
 
         # === Buttons ===
         btns = ttk.Frame(frm, style="TFrame")
@@ -4175,7 +4344,7 @@ class App(tk.Tk):
         self.ui_edit_info()
     
     def ui_edit_notes(self):
-        """Edit perfume notes: Links, My Notes, Others' Notes"""
+        """Edit perfume notes and links"""
         pid = self._get_selected_id()
         if not pid:
             messagebox.showinfo("Select", "Please select a perfume first.")
@@ -4184,14 +4353,16 @@ class App(tk.Tk):
         if not p:
             return
         
-        # Initialize links if not exists
+        # Initialize if not exists
         if not hasattr(p, 'links') or p.links is None:
             p.links = []
+        if not hasattr(p, 'notes') or p.notes is None:
+            p.notes = []
 
         win = tk.Toplevel(self)
         win.title("Notes & Links")
         win.configure(bg=COLORS["bg"])
-        win.geometry("500x480")
+        win.geometry("550x550")
         win.transient(self)
 
         frm = ttk.Frame(win, style="TFrame")
@@ -4211,11 +4382,17 @@ class App(tk.Tk):
                 return url
 
         # === Links ===
-        links_frame = ttk.LabelFrame(frm, text="Links (double-click to edit/remove)", style="TLabelframe")
+        links_frame = ttk.LabelFrame(frm, text="Links", style="TLabelframe")
         links_frame.pack(fill="x", pady=(0, 8))
         
-        links_listbox = tk.Listbox(links_frame, height=3)
-        links_listbox.pack(fill="x", padx=8, pady=(4, 0))
+        links_list_frame = ttk.Frame(links_frame, style="TFrame")
+        links_list_frame.pack(fill="x", padx=8, pady=(4, 0))
+        
+        links_listbox = tk.Listbox(links_list_frame, height=3)
+        links_scrollbar = ttk.Scrollbar(links_list_frame, orient="vertical", command=links_listbox.yview)
+        links_listbox.configure(yscrollcommand=links_scrollbar.set)
+        links_listbox.pack(side="left", fill="x", expand=True)
+        links_scrollbar.pack(side="right", fill="y")
         
         def refresh_links():
             links_listbox.delete(0, "end")
@@ -4225,38 +4402,12 @@ class App(tk.Tk):
         
         refresh_links()
         
-        def edit_link(event):
-            sel = links_listbox.curselection()
-            if not sel:
-                return
-            idx = sel[0]
-            link = p.links[idx]
-            
-            # Ask for action
-            action = simpledialog.askstring("Edit Link", 
-                f"Current: {link.get('label', '')} - {link.get('url', '')}\n\nEnter 'delete' to remove, or new URL:",
-                parent=win)
-            if action is None:
-                return
-            if action.lower() == "delete":
-                p.links.pop(idx)
-            else:
-                new_url = action.strip()
-                if new_url:
-                    new_label = simpledialog.askstring("Label", "Label (leave empty for auto):", parent=win)
-                    p.links[idx] = {"label": new_label or "", "url": new_url}
-            refresh_links()
-            self.save()
-            self._on_select()  # Refresh right panel display
-        
-        links_listbox.bind("<Double-1>", edit_link)
-        
-        # Add link
+        # Add link input
         links_add_frame = ttk.Frame(links_frame, style="TFrame")
         links_add_frame.pack(fill="x", padx=8, pady=4)
         
         var_new_link = tk.StringVar()
-        ttk.Entry(links_add_frame, textvariable=var_new_link, width=35).pack(side="left")
+        ttk.Entry(links_add_frame, textvariable=var_new_link, width=22).pack(side="left")
         
         def add_link():
             url = var_new_link.get().strip()
@@ -4267,124 +4418,235 @@ class App(tk.Tk):
             refresh_links()
             var_new_link.set("")
             self.save()
-            self._on_select()  # Refresh right panel display
+            self._on_select()
         
-        ttk.Button(links_add_frame, text="Add", command=add_link, width=6).pack(side="left", padx=(4, 0))
-
-        # === My Notes ===
-        my_notes_frame = ttk.LabelFrame(frm, text="My Notes (double-click to edit/remove)", style="TLabelframe")
-        my_notes_frame.pack(fill="both", expand=True, pady=(0, 8))
-        
-        my_notes_listbox = tk.Listbox(my_notes_frame, height=4)
-        my_notes_listbox.pack(fill="both", expand=True, padx=8, pady=(4, 0))
-        
-        def refresh_my_notes():
-            my_notes_listbox.delete(0, "end")
-            for note in p.notes_my:
-                my_notes_listbox.insert("end", note)
-        
-        refresh_my_notes()
-        
-        def edit_my_note(event):
-            sel = my_notes_listbox.curselection()
+        def edit_link():
+            sel = links_listbox.curselection()
             if not sel:
+                messagebox.showinfo("Select", "Please select a link first.", parent=win)
                 return
             idx = sel[0]
-            current = p.notes_my[idx]
+            link = p.links[idx]
             
-            new_text = simpledialog.askstring("Edit Note", 
-                "Enter 'delete' to remove, or new text:",
-                initialvalue=current, parent=win)
-            if new_text is None:
+            new_url = simpledialog.askstring("Edit URL", "URL:", initialvalue=link.get("url", ""), parent=win)
+            if new_url is None:
                 return
-            if new_text.lower() == "delete":
-                p.notes_my.pop(idx)
-            else:
-                p.notes_my[idx] = new_text
-            refresh_my_notes()
-            self._on_select()
-            self.save()
-        
-        my_notes_listbox.bind("<Double-1>", edit_my_note)
-        
-        # Add my note
-        my_add_frame = ttk.Frame(my_notes_frame, style="TFrame")
-        my_add_frame.pack(fill="x", padx=8, pady=4)
-        
-        var_new_my_note = tk.StringVar()
-        ttk.Entry(my_add_frame, textvariable=var_new_my_note, width=35).pack(side="left")
-        
-        def add_my_note():
-            note = var_new_my_note.get().strip()
-            if not note:
+            new_label = simpledialog.askstring("Edit Label", "Label (leave empty for auto):", 
+                                              initialvalue=link.get("label", ""), parent=win)
+            if new_label is None:
                 return
-            p.notes_my.append(note)
-            refresh_my_notes()
-            var_new_my_note.set("")
-            self._on_select()
+            p.links[idx] = {"label": new_label or "", "url": new_url}
+            refresh_links()
             self.save()
+            self._on_select()
         
-        ttk.Button(my_add_frame, text="Add", command=add_my_note, width=6).pack(side="left", padx=(4, 0))
+        def delete_link():
+            sel = links_listbox.curselection()
+            if sel:
+                p.links.pop(sel[0])
+                refresh_links()
+                self.save()
+                self._on_select()
+        
+        def move_link_up():
+            sel = links_listbox.curselection()
+            if sel and sel[0] > 0:
+                idx = sel[0]
+                p.links[idx], p.links[idx-1] = p.links[idx-1], p.links[idx]
+                refresh_links()
+                links_listbox.selection_set(idx-1)
+                self.save()
+                self._on_select()
+        
+        def move_link_down():
+            sel = links_listbox.curselection()
+            if sel and sel[0] < len(p.links) - 1:
+                idx = sel[0]
+                p.links[idx], p.links[idx+1] = p.links[idx+1], p.links[idx]
+                refresh_links()
+                links_listbox.selection_set(idx+1)
+                self.save()
+                self._on_select()
+        
+        # Button bar
+        ttk.Button(links_add_frame, text="Add", command=add_link, width=5).pack(side="left", padx=(4, 0))
+        ttk.Button(links_add_frame, text="Edit", command=edit_link, width=5).pack(side="left", padx=(4, 0))
+        ttk.Button(links_add_frame, text="Del", command=delete_link, width=4).pack(side="left", padx=(4, 0))
+        ttk.Button(links_add_frame, text="↑", command=move_link_up, width=2).pack(side="left", padx=(8, 0))
+        ttk.Button(links_add_frame, text="↓", command=move_link_down, width=2).pack(side="left", padx=(2, 0))
 
-        # === Others' Notes ===
-        other_notes_frame = ttk.LabelFrame(frm, text="Others' Notes (double-click to edit/remove)", style="TLabelframe")
-        other_notes_frame.pack(fill="both", expand=True, pady=(0, 8))
+        # === Notes ===
+        notes_frame = ttk.LabelFrame(frm, text="Notes", style="TLabelframe")
+        notes_frame.pack(fill="both", expand=True, pady=(0, 8))
         
-        other_notes_listbox = tk.Listbox(other_notes_frame, height=4)
-        other_notes_listbox.pack(fill="both", expand=True, padx=8, pady=(4, 0))
+        # Notes list with scrollbar
+        notes_list_frame = ttk.Frame(notes_frame, style="TFrame")
+        notes_list_frame.pack(fill="both", expand=True, padx=8, pady=(4, 0))
         
-        def refresh_other_notes():
-            other_notes_listbox.delete(0, "end")
-            for note in p.notes_others:
-                other_notes_listbox.insert("end", note)
+        notes_listbox = tk.Listbox(notes_list_frame, height=6)
+        notes_scrollbar = ttk.Scrollbar(notes_list_frame, orient="vertical", command=notes_listbox.yview)
+        notes_listbox.configure(yscrollcommand=notes_scrollbar.set)
         
-        refresh_other_notes()
+        notes_listbox.pack(side="left", fill="both", expand=True)
+        notes_scrollbar.pack(side="right", fill="y")
         
-        def edit_other_note(event):
-            sel = other_notes_listbox.curselection()
+        def refresh_notes():
+            notes_listbox.delete(0, "end")
+            for note in p.notes:
+                preview = note.content[:50] + "..." if len(note.content) > 50 else note.content
+                preview = preview.replace("\n", " ")
+                notes_listbox.insert("end", f"[{note.title}] {preview}")
+        
+        refresh_notes()
+        
+        # Note action buttons
+        notes_btn_frame = ttk.Frame(notes_frame, style="TFrame")
+        notes_btn_frame.pack(fill="x", padx=8, pady=4)
+        
+        def add_note():
+            self._open_note_editor(win, p, None, refresh_notes)
+        
+        def edit_note():
+            sel = notes_listbox.curselection()
             if not sel:
+                messagebox.showinfo("Select", "Please select a note first.", parent=win)
                 return
             idx = sel[0]
-            current = p.notes_others[idx]
-            
-            new_text = simpledialog.askstring("Edit Note", 
-                "Enter 'delete' to remove, or new text:",
-                initialvalue=current, parent=win)
-            if new_text is None:
+            self._open_note_editor(win, p, idx, refresh_notes)
+        
+        def delete_note():
+            sel = notes_listbox.curselection()
+            if not sel:
+                messagebox.showinfo("Select", "Please select a note first.", parent=win)
                 return
-            if new_text.lower() == "delete":
-                p.notes_others.pop(idx)
-            else:
-                p.notes_others[idx] = new_text
-            refresh_other_notes()
-            self._on_select()
-            self.save()
+            idx = sel[0]
+            note = p.notes[idx]
+            if messagebox.askyesno("Delete Note", f"Delete note '{note.title}'?", parent=win):
+                p.notes.pop(idx)
+                refresh_notes()
+                self.save()
+                self._on_select()
         
-        other_notes_listbox.bind("<Double-1>", edit_other_note)
-        
-        # Add other note
-        other_add_frame = ttk.Frame(other_notes_frame, style="TFrame")
-        other_add_frame.pack(fill="x", padx=8, pady=4)
-        
-        var_new_other_note = tk.StringVar()
-        ttk.Entry(other_add_frame, textvariable=var_new_other_note, width=35).pack(side="left")
-        
-        def add_other_note():
-            note = var_new_other_note.get().strip()
-            if not note:
+        def move_up():
+            sel = notes_listbox.curselection()
+            if not sel or sel[0] == 0:
                 return
-            p.notes_others.append(note)
-            refresh_other_notes()
-            var_new_other_note.set("")
-            self._on_select()
+            idx = sel[0]
+            p.notes[idx], p.notes[idx-1] = p.notes[idx-1], p.notes[idx]
+            refresh_notes()
+            notes_listbox.selection_set(idx-1)
             self.save()
+            self._on_select()
         
-        ttk.Button(other_add_frame, text="Add", command=add_other_note, width=6).pack(side="left", padx=(4, 0))
+        def move_down():
+            sel = notes_listbox.curselection()
+            if not sel or sel[0] >= len(p.notes) - 1:
+                return
+            idx = sel[0]
+            p.notes[idx], p.notes[idx+1] = p.notes[idx+1], p.notes[idx]
+            refresh_notes()
+            notes_listbox.selection_set(idx+1)
+            self.save()
+            self._on_select()
+        
+        ttk.Button(notes_btn_frame, text="Add", command=add_note, width=8).pack(side="left", padx=(0, 4))
+        ttk.Button(notes_btn_frame, text="Edit", command=edit_note, width=8).pack(side="left", padx=(0, 4))
+        ttk.Button(notes_btn_frame, text="Delete", command=delete_note, width=8).pack(side="left", padx=(0, 4))
+        ttk.Button(notes_btn_frame, text="↑", command=move_up, width=3).pack(side="left", padx=(8, 2))
+        ttk.Button(notes_btn_frame, text="↓", command=move_down, width=3).pack(side="left")
+        
+        notes_listbox.bind("<Double-1>", lambda e: edit_note())
 
         # === Close button ===
         ttk.Button(frm, text="Close", command=win.destroy).pack(anchor="e", pady=(8, 0))
+    
+    def _open_note_editor(self, parent_win, perfume: Perfume, note_idx: Optional[int], on_save):
+        """Open note editor dialog for add/edit"""
+        is_edit = note_idx is not None
+        note = perfume.notes[note_idx] if is_edit else None
+        
+        win = tk.Toplevel(parent_win)
+        win.title("Edit Note" if is_edit else "Add Note")
+        win.configure(bg=COLORS["bg"])
+        win.geometry("450x350")
+        win.transient(parent_win)
+        win.grab_set()
+        
+        frm = ttk.Frame(win, style="TFrame")
+        frm.pack(fill="both", expand=True, padx=12, pady=12)
+        
+        # Title
+        title_frame = ttk.Frame(frm, style="TFrame")
+        title_frame.pack(fill="x", pady=(0, 8))
+        
+        ttk.Label(title_frame, text="Title:", style="TLabel").pack(side="left", padx=(0, 8))
+        var_title = tk.StringVar(value=note.title if is_edit else "Note")
+        title_entry = ttk.Entry(title_frame, textvariable=var_title, width=30)
+        title_entry.pack(side="left", fill="x", expand=True)
+        
+        # Quick title buttons
+        quick_btn_frame = ttk.Frame(frm, style="TFrame")
+        quick_btn_frame.pack(fill="x", pady=(0, 8))
+        
+        for quick_title in NOTE_QUICK_TITLES:
+            btn = ttk.Button(quick_btn_frame, text=quick_title, 
+                           command=lambda t=quick_title: var_title.set(t), width=10)
+            btn.pack(side="left", padx=(0, 4))
+        
+        # Buttons - pack FIRST at bottom so they don't get pushed out
+        btn_frame = ttk.Frame(frm, style="TFrame")
+        btn_frame.pack(side="bottom", fill="x", pady=(12, 0))
+        
+        # Content - now can expand in remaining space
+        ttk.Label(frm, text="Content:", style="TLabel").pack(anchor="w", pady=(0, 4))
+        
+        content_frame = ttk.Frame(frm, style="TFrame")
+        content_frame.pack(fill="both", expand=True)
+        
+        content_text = tk.Text(content_frame, wrap="word", 
+                              font=("TkDefaultFont", 10),
+                              bg=COLORS["bg"], fg=COLORS["text"])
+        content_scrollbar = ttk.Scrollbar(content_frame, orient="vertical", command=content_text.yview)
+        content_text.configure(yscrollcommand=content_scrollbar.set)
+        
+        content_text.pack(side="left", fill="both", expand=True)
+        content_scrollbar.pack(side="right", fill="y")
+        
+        if is_edit:
+            content_text.insert("1.0", note.content)
+        
+        def save_note():
+            title = var_title.get().strip() or "Note"
+            content = content_text.get("1.0", "end-1c").strip()
+            
+            if not content:
+                messagebox.showwarning("Empty", "Please enter some content.", parent=win)
+                return
+            
+            if is_edit:
+                perfume.notes[note_idx].title = title
+                perfume.notes[note_idx].content = content
+            else:
+                new_note = Note(
+                    id=new_id(),
+                    title=title,
+                    content=content,
+                    created_at=now_ts()
+                )
+                perfume.notes.append(new_note)
+            
+            self.save()
+            self._on_select()
+            on_save()
+            win.destroy()
+        
+        # Save button on the left (more prominent), Cancel on right
+        save_btn = ttk.Button(btn_frame, text="💾 Save", command=save_note, width=12)
+        save_btn.pack(side="left")
+        ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side="right")
 
     def ui_add_note(self):
+        """Quick add note - opens note editor dialog"""
         pid = self._get_selected_id()
         if not pid:
             messagebox.showinfo("Select", "Please select a perfume first.")
@@ -4392,98 +4654,12 @@ class App(tk.Tk):
         p = self._get_perfume(pid)
         if not p:
             return
-
-        win = tk.Toplevel(self)
-        win.title("Add Note (mouse-first)")
-        win.configure(bg=COLORS["bg"])
-        win.resizable(False, False)
-
-        frm = ttk.Frame(win, style="TFrame")
-        frm.pack(padx=12, pady=12)
-
-        brand_display = self.get_brand_name(p.brand_id)
-        ttk.Label(frm, text=f"{brand_display} – {p.name}", style="TLabel", font=("TkDefaultFont", 11, "bold")).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 10))
-
-        var_kind = tk.StringVar(value="my")
-        ttk.Radiobutton(frm, text="My note", value="my", variable=var_kind).grid(row=1, column=0, sticky="w")
-        ttk.Radiobutton(frm, text="Others' note", value="others", variable=var_kind).grid(row=1, column=1, sticky="w")
-
-        ttk.Label(frm, text="Text:", style="TLabel").grid(row=2, column=0, sticky="e", padx=(0, 8), pady=8)
-        var_text = tk.StringVar(value="")
-        ent = ttk.Entry(frm, textvariable=var_text, width=42)
-        ent.grid(row=2, column=1, sticky="w", pady=8)
-
-        # Quick chips (mouse)
-        chips = ttk.Frame(frm, style="TFrame")
-        chips.grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 8))
-        for txt in ["Nice opening", "Too sweet", "Fresh", "Powdery", "Woody", "Good for office", "Try on skin again"]:
-            ttk.Button(chips, text=txt, command=lambda t=txt: var_text.set(t)).pack(side="left", padx=4)
-
-        btns = ttk.Frame(frm, style="TFrame")
-        btns.grid(row=4, column=0, columnspan=2, sticky="e", pady=(6, 0))
-        ttk.Button(btns, text="Cancel", command=win.destroy).pack(side="right")
-        ttk.Button(btns, text="Add", command=lambda: self._add_note(p, var_kind.get(), var_text.get(), win)).pack(side="right", padx=(0, 8))
-
-        ent.focus_set()
-
-    def _add_note(self, p: Perfume, which: str, text: str, win: tk.Toplevel):
-        text = (text or "").strip()
-        if not text:
-            messagebox.showwarning("Missing", "Note text is empty.")
-            return
-        if which == "others":
-            p.notes_others.append(text)
-        else:
-            p.notes_my.append(text)
-
-        self._on_select()
-        self._refresh_list()
-        self.tree.selection_set(p.id)
-        self.tree.focus(p.id)
-        self.save()
-        win.destroy()
-
-    def ui_remove_note(self, which: str):
-        """
-        Mouse-first:
-          - Double-click a note in listbox to remove it
-        """
-        pid = self._get_selected_id()
-        if not pid:
-            return
-        p = self._get_perfume(pid)
-        if not p:
-            return
-
-        if which == "others":
-            lb = self.list_other_notes
-            notes = p.notes_others
-            title = "Remove Others' Note"
-        else:
-            lb = self.list_my_notes
-            notes = p.notes_my
-            title = "Remove My Note"
-
-        sel = lb.curselection()
-        if not sel:
-            return
-        idx = int(sel[0])
-
-        txt = notes[idx] if 0 <= idx < len(notes) else ""
-        if not txt:
-            return
-
-        if not messagebox.askyesno(title, f"Remove this note?\n\n{txt}"):
-            return
-
-        try:
-            notes.pop(idx)
-        except Exception:
-            return
-
-        self._on_select()
-        self._refresh_list()
-        self.save()
+        
+        # Initialize notes if not exists
+        if not hasattr(p, 'notes') or p.notes is None:
+            p.notes = []
+        
+        self._open_note_editor(self, p, None, lambda: self._on_select())
 
     def quick_event(self, event_type: str):
         """
@@ -4634,6 +4810,14 @@ class App(tk.Tk):
         brand_display = self.get_brand_name(p.brand_id)
         ttk.Label(main_frame, text=f"{brand_display} – {p.name}", style="TLabel", font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 10))
         
+        # URL input
+        url_frame = ttk.Frame(main_frame, style="TFrame")
+        url_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(url_frame, text="Fragrantica URL:", style="TLabel").pack(side="left")
+        var_url = tk.StringVar(value=(p.fragrantica or {}).get("url", ""))
+        url_entry = ttk.Entry(url_frame, textvariable=var_url, width=45)
+        url_entry.pack(side="left", padx=(8, 0), fill="x", expand=True)
+        
         ttk.Label(main_frame, text="Enter raw vote counts from Fragrantica:", style="Muted.TLabel").pack(anchor="w", pady=(0, 10))
 
         # Create a scrollable frame for all vote blocks
@@ -4697,7 +4881,7 @@ class App(tk.Tk):
         
         ttk.Button(btn_frame, text="Clear All", command=lambda: self._clear_fragrantica_inputs(entry_map)).pack(side="left")
         ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side="right", padx=(8, 0))
-        ttk.Button(btn_frame, text="Save", command=lambda: self._save_fragrantica(p, entry_map, win)).pack(side="right")
+        ttk.Button(btn_frame, text="Save", command=lambda: self._save_fragrantica(p, entry_map, var_url.get(), win)).pack(side="right")
 
     def _clear_fragrantica_inputs(self, entry_map: Dict[str, Dict[str, tk.StringVar]]):
         """Clear all Fragrantica input fields"""
@@ -4705,7 +4889,7 @@ class App(tk.Tk):
             for key, var in vars_dict.items():
                 var.set("0")
 
-    def _save_fragrantica(self, p: Perfume, entry_map: Dict[str, Dict[str, tk.StringVar]], win: tk.Toplevel):
+    def _save_fragrantica(self, p: Perfume, entry_map: Dict[str, Dict[str, tk.StringVar]], url: str, win: tk.Toplevel):
         """Save Fragrantica vote data to perfume"""
         if p.fragrantica is None:
             p.fragrantica = {}
@@ -4726,6 +4910,13 @@ class App(tk.Tk):
                     return
             
             p.fragrantica[block_name] = block_data
+        
+        # Save URL
+        url = url.strip()
+        if url:
+            p.fragrantica["url"] = url
+        elif "url" in p.fragrantica:
+            del p.fragrantica["url"]
         
         # Add metadata
         p.fragrantica["source"] = "fragrantica"
@@ -4756,8 +4947,9 @@ class App(tk.Tk):
         self.tree.delete(*self.tree.get_children())
         self.detail_title.config(text="(no selection)")
         self.state_label.config(text="")
-        self.list_my_notes.delete(0, "end")
-        self.list_other_notes.delete(0, "end")
+        # Clear notes display
+        for widget in self.notes_display_frame.winfo_children():
+            widget.destroy()
         for block in self.vote_blocks.values():
             block.set_data("", {}, {}, False)  # clear render
 

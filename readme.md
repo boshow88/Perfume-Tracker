@@ -54,7 +54,7 @@ python perfume_tracker.py
 ### Main Layout
 ```
 ┌─────────────────────────┬────────────────────────────┐
-│ [Add] [Manage]          │ [Info][Notes][Events]      │
+│ [Add] [Manage]          │ [Info][Memo][Events]       │
 │ [Sort][Filter][________ │ [Fragrantica]              │
 │ Search________________] │ Date:[____] @[____]        │
 │                         │ [Smell] [Skin]             │
@@ -67,7 +67,7 @@ python perfume_tracker.py
 │ │                     │ │ ▶ Longevity ████     3.1   │
 │ │                     │ │ ...                        │
 │ │                     │ │                            │
-│ └─────────────────────┘ │ Links / My Notes / Others  │
+│ └─────────────────────┘ │ Fragrantica ↗ / Links / Notes │
 └─────────────────────────┴────────────────────────────┘
       Left: General Actions       Right: Selected Perfume Details
 ```
@@ -87,7 +87,7 @@ python perfume_tracker.py
 | Button | Function |
 |--------|----------|
 | Info | Edit basic info (Brand/Name/Concentration/Location/Tags) |
-| Notes | Edit Links / My Notes / Others' Notes |
+| Memo | Edit Links and Notes |
 | Events | Edit event history |
 | Fragrantica | Edit Fragrantica vote data |
 | Date / @ / Smell / Skin | Quick Event logging |
@@ -114,8 +114,7 @@ Enter keywords in the search box and press Enter or click the Search button.
 - Brand name
 - Perfume name
 - Tag names
-- My Notes content
-- Others' Notes content
+- Note titles and content
 
 **How it works**:
 - Combines all fields above into a single string
@@ -185,6 +184,8 @@ Date and Location persist when switching perfumes for batch logging.
 
 ### 6. Fragrantica Voting
 
+**Fragrantica URL**: You can save the Fragrantica page URL. If set, the "Fragrantica ↗" title in the right panel becomes clickable.
+
 **6 Rating Dimensions**:
 1. **Rating** - love / like / ok / dislike / hate
 2. **Longevity** - eternal / long / moderate / weak / poor (best on top)
@@ -201,12 +202,20 @@ Date and Location persist when switching perfumes for batch logging.
 - Gray = Not voted
 - Dark orange = Voted (click option name to vote/unvote)
 
-### 7. Links Management
+### 7. Links & Notes Management
 
-Manage external links in the Notes dialog:
-- Add Link: Enter URL, optionally add Label
-- Edit/Delete: Double-click item
+Manage in the Memo dialog:
+
+**Links**:
+- Add/Edit/Delete links with URL and optional label
+- Reorder with ↑/↓ buttons
 - Click links in right panel to open in browser
+
+**Notes**:
+- Each note has a Title and Content
+- Quick title buttons: "My Notes", "Review"
+- Multi-line content with auto-wrap
+- Reorder with ↑/↓ buttons
 
 ---
 
@@ -225,11 +234,20 @@ class Perfume:
     created_at: int            # Creation timestamp
     updated_at: int            # Update timestamp
     events: List[Event]
-    notes_my: List[str]
-    notes_others: List[str]
+    notes: List[Note]          # Notes with title and content
     links: List[Dict]          # [{"label": "...", "url": "..."}]
     fragrantica: Dict          # Fragrantica vote data
     my_votes: Dict             # Personal vote data
+```
+
+### Note
+```python
+@dataclass
+class Note:
+    id: str                    # UUID
+    title: str                 # Note title (default: "Note")
+    content: str               # Note content (multi-line)
+    created_at: int            # Creation timestamp
 ```
 
 ### Event
