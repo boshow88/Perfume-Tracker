@@ -172,8 +172,18 @@ class Note:
     created_at: int = field(default_factory=now_ts)
 
 
-# Common note titles for quick selection
-NOTE_QUICK_TITLES = ["My Notes", "Review"]
+# Default note titles for quick selection
+DEFAULT_NOTE_TITLES = ["My Notes", "Review"]
+
+
+def get_label_from_url(url: str) -> str:
+    """Extract domain from URL for display"""
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(url)
+        return parsed.netloc or url
+    except:
+        return url
 
 
 @dataclass
@@ -220,6 +230,7 @@ class AppData:
     outlets_map: Dict[str, OutletInfo] = field(default_factory=dict)   # {id: OutletInfo}
     tags_map: Dict[str, str] = field(default_factory=dict)             # {id: name}
     purchase_types_map: Dict[str, str] = field(default_factory=dict)   # {id: name}
+    note_titles_map: Dict[str, str] = field(default_factory=dict)      # {id: title}
 
 
 # Default values for new data types
@@ -296,6 +307,8 @@ def load_app_data() -> AppData:
             app_data.concentrations_map[new_id()] = conc
         for pt in DEFAULT_PURCHASE_TYPES:
             app_data.purchase_types_map[new_id()] = pt
+        for title in DEFAULT_NOTE_TITLES:
+            app_data.note_titles_map[new_id()] = title
         return app_data
 
     with open(DB_PATH, "r", encoding="utf-8") as f:
@@ -307,6 +320,8 @@ def load_app_data() -> AppData:
                 app_data.concentrations_map[new_id()] = conc
             for pt in DEFAULT_PURCHASE_TYPES:
                 app_data.purchase_types_map[new_id()] = pt
+            for title in DEFAULT_NOTE_TITLES:
+                app_data.note_titles_map[new_id()] = title
             return app_data
         raw = json.loads(content)
 
@@ -317,6 +332,7 @@ def load_app_data() -> AppData:
     app_data.concentrations_map = raw.get("concentrations_map", {})
     app_data.tags_map = raw.get("tags_map", {})
     app_data.purchase_types_map = raw.get("purchase_types_map", {})
+    app_data.note_titles_map = raw.get("note_titles_map", {})
     
     # Load outlets_map (needs special handling for OutletInfo)
     for oid, oinfo in raw.get("outlets_map", {}).items():
@@ -388,6 +404,11 @@ def load_app_data() -> AppData:
     if not app_data.purchase_types_map:
         for pt in DEFAULT_PURCHASE_TYPES:
             app_data.purchase_types_map[new_id()] = pt
+    
+    # Initialize default note titles if empty
+    if not app_data.note_titles_map:
+        for title in DEFAULT_NOTE_TITLES:
+            app_data.note_titles_map[new_id()] = title
 
     return app_data
 
@@ -416,6 +437,7 @@ def save_app_data(app_data: AppData):
         "outlets_map": {oid: outlet_to_dict(o) for oid, o in app_data.outlets_map.items()},
         "tags_map": app_data.tags_map,
         "purchase_types_map": app_data.purchase_types_map,
+        "note_titles_map": app_data.note_titles_map,
     }
     
     with open(DB_PATH, "w", encoding="utf-8") as f:
@@ -2097,7 +2119,7 @@ class ManageDataDialog(tk.Toplevel):
     
     def _add_new(self):
         if self.current_tab == "outlets":
-            name = simpledialog.askstring("Add Outlet", "Enter outlet name:", parent=self)
+            name = simpledialog.askstring("Add Location", "Enter location name:", parent=self)
             if not name:
                 return
             name = name.strip()
@@ -3711,10 +3733,16 @@ class App(tk.Tk):
         brand_display = self.get_brand_name(p.brand_id)
         self.detail_title.config(text=f"{brand_display} – {p.name}")
         
-        # State (derived from events)
+        # Concentration + State (derived from events)
         tag_names_for_state = [self.get_tag_name(tid) for tid in p.tag_ids]
         state, _ = derive_state(p, tag_names_for_state)
-        self.state_label.config(text=state if state else "New")
+        state_text = state if state else "New"
+        
+        # Add concentration before state
+        conc_name = self.get_concentration_name(p.concentration_id)
+        if conc_name:
+            state_text = f"{conc_name} · {state_text}"
+        self.state_label.config(text=state_text)
         
         # tags - display as gray text, click to expand
         tag_names = [self.get_tag_name(tid) for tid in p.tag_ids]
@@ -3740,8 +3768,8 @@ class App(tk.Tk):
             ttk.Label(self.links_display_frame, text="(No links)", style="Muted.TLabel").pack(anchor="w")
         else:
             for link in links:
-                label = link.get("label") or link.get("url", "")
                 url = link.get("url", "")
+                label = link.get("label") or get_label_from_url(url)
                 # Create clickable link
                 link_label = tk.Label(self.links_display_frame, text=label, 
                                      fg=COLORS["accent"], bg=COLORS["panel"],
@@ -4372,15 +4400,6 @@ class App(tk.Tk):
         ttk.Label(frm, text=f"{brand_display} – {p.name}", style="TLabel", 
                   font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 12))
 
-        # Helper to extract domain from URL
-        def get_label_from_url(url: str) -> str:
-            try:
-                from urllib.parse import urlparse
-                parsed = urlparse(url)
-                return parsed.netloc or url
-            except:
-                return url
-
         # === Links ===
         links_frame = ttk.LabelFrame(frm, text="Links", style="TLabelframe")
         links_frame.pack(fill="x", pady=(0, 8))
@@ -4402,23 +4421,40 @@ class App(tk.Tk):
         
         refresh_links()
         
-        # Add link input
-        links_add_frame = ttk.Frame(links_frame, style="TFrame")
-        links_add_frame.pack(fill="x", padx=8, pady=4)
+        # Add link input - two rows: URL and Label
+        links_input_frame = ttk.Frame(links_frame, style="TFrame")
+        links_input_frame.pack(fill="x", padx=8, pady=4)
         
-        var_new_link = tk.StringVar()
-        ttk.Entry(links_add_frame, textvariable=var_new_link, width=22).pack(side="left")
+        # URL row
+        url_row = ttk.Frame(links_input_frame, style="TFrame")
+        url_row.pack(fill="x", pady=(0, 2))
+        ttk.Label(url_row, text="URL:", width=6, style="TLabel").pack(side="left")
+        var_new_url = tk.StringVar()
+        ttk.Entry(url_row, textvariable=var_new_url, width=45).pack(side="left", fill="x", expand=True)
+        
+        # Label row
+        label_row = ttk.Frame(links_input_frame, style="TFrame")
+        label_row.pack(fill="x")
+        ttk.Label(label_row, text="Label:", width=6, style="TLabel").pack(side="left")
+        var_new_label = tk.StringVar()
+        ttk.Entry(label_row, textvariable=var_new_label, width=20).pack(side="left")
+        ttk.Label(label_row, text="(optional)", style="Muted.TLabel").pack(side="left", padx=(4, 0))
         
         def add_link():
-            url = var_new_link.get().strip()
+            url = var_new_url.get().strip()
             if not url:
                 return
-            label = simpledialog.askstring("Label", "Label (leave empty for auto):", parent=win)
-            p.links.append({"label": label or "", "url": url})
+            label = var_new_label.get().strip()
+            p.links.append({"label": label, "url": url})
             refresh_links()
-            var_new_link.set("")
+            var_new_url.set("")
+            var_new_label.set("")
             self.save()
             self._on_select()
+        
+        # Button frame
+        links_add_frame = ttk.Frame(links_frame, style="TFrame")
+        links_add_frame.pack(fill="x", padx=8, pady=(0, 4))
         
         def edit_link():
             sel = links_listbox.curselection()
@@ -4428,17 +4464,49 @@ class App(tk.Tk):
             idx = sel[0]
             link = p.links[idx]
             
-            new_url = simpledialog.askstring("Edit URL", "URL:", initialvalue=link.get("url", ""), parent=win)
-            if new_url is None:
-                return
-            new_label = simpledialog.askstring("Edit Label", "Label (leave empty for auto):", 
-                                              initialvalue=link.get("label", ""), parent=win)
-            if new_label is None:
-                return
-            p.links[idx] = {"label": new_label or "", "url": new_url}
-            refresh_links()
-            self.save()
-            self._on_select()
+            # Create edit dialog with both fields
+            edit_win = tk.Toplevel(win)
+            edit_win.title("Edit Link")
+            edit_win.configure(bg=COLORS["bg"])
+            edit_win.geometry("400x140")
+            edit_win.transient(win)
+            edit_win.grab_set()
+            
+            edit_frm = ttk.Frame(edit_win, style="TFrame")
+            edit_frm.pack(fill="both", expand=True, padx=12, pady=12)
+            
+            # URL row
+            url_edit_row = ttk.Frame(edit_frm, style="TFrame")
+            url_edit_row.pack(fill="x", pady=(0, 8))
+            ttk.Label(url_edit_row, text="URL:", width=6, style="TLabel").pack(side="left")
+            var_edit_url = tk.StringVar(value=link.get("url", ""))
+            ttk.Entry(url_edit_row, textvariable=var_edit_url, width=45).pack(side="left", fill="x", expand=True)
+            
+            # Label row
+            label_edit_row = ttk.Frame(edit_frm, style="TFrame")
+            label_edit_row.pack(fill="x", pady=(0, 8))
+            ttk.Label(label_edit_row, text="Label:", width=6, style="TLabel").pack(side="left")
+            var_edit_label = tk.StringVar(value=link.get("label", ""))
+            ttk.Entry(label_edit_row, textvariable=var_edit_label, width=30).pack(side="left")
+            ttk.Label(label_edit_row, text="(optional)", style="Muted.TLabel").pack(side="left", padx=(4, 0))
+            
+            def save_edit():
+                new_url = var_edit_url.get().strip()
+                if not new_url:
+                    messagebox.showwarning("Required", "URL is required.", parent=edit_win)
+                    return
+                new_label = var_edit_label.get().strip()
+                p.links[idx] = {"label": new_label, "url": new_url}
+                refresh_links()
+                self.save()
+                self._on_select()
+                edit_win.destroy()
+            
+            # Buttons
+            btn_frame = ttk.Frame(edit_frm, style="TFrame")
+            btn_frame.pack(fill="x", pady=(8, 0))
+            ttk.Button(btn_frame, text="Save", command=save_edit).pack(side="left", padx=(0, 8))
+            ttk.Button(btn_frame, text="Cancel", command=edit_win.destroy).pack(side="left")
         
         def delete_link():
             sel = links_listbox.curselection()
@@ -4560,6 +4628,82 @@ class App(tk.Tk):
         # === Close button ===
         ttk.Button(frm, text="Close", command=win.destroy).pack(anchor="e", pady=(8, 0))
     
+    def _manage_note_titles(self, parent_win, on_change=None):
+        """Manage quick note titles"""
+        win = tk.Toplevel(parent_win)
+        win.title("Manage Note Titles")
+        win.configure(bg=COLORS["bg"])
+        win.geometry("300x250")
+        win.transient(parent_win)
+        win.grab_set()
+        
+        frm = ttk.Frame(win, style="TFrame")
+        frm.pack(fill="both", expand=True, padx=12, pady=12)
+        
+        ttk.Label(frm, text="Quick Note Titles:", style="TLabel").pack(anchor="w", pady=(0, 4))
+        
+        # Listbox with scrollbar
+        list_frame = ttk.Frame(frm, style="TFrame")
+        list_frame.pack(fill="both", expand=True, pady=(0, 8))
+        
+        listbox = tk.Listbox(list_frame, height=6)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=listbox.yview)
+        listbox.configure(yscrollcommand=scrollbar.set)
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Keep track of id -> title mapping for the listbox
+        title_ids = []
+        
+        def refresh_list():
+            nonlocal title_ids
+            listbox.delete(0, "end")
+            title_ids = []
+            for tid, title in sorted(self.app_data.note_titles_map.items(), key=lambda x: x[1]):
+                listbox.insert("end", title)
+                title_ids.append(tid)
+        
+        refresh_list()
+        
+        # Add new title
+        add_frame = ttk.Frame(frm, style="TFrame")
+        add_frame.pack(fill="x", pady=(0, 8))
+        
+        var_new = tk.StringVar()
+        ttk.Entry(add_frame, textvariable=var_new, width=20).pack(side="left", fill="x", expand=True)
+        
+        def add_title():
+            new_title = var_new.get().strip()
+            if not new_title:
+                return
+            # Check for duplicates
+            if new_title in self.app_data.note_titles_map.values():
+                messagebox.showinfo("Exists", "This title already exists.", parent=win)
+                return
+            self.app_data.note_titles_map[new_id()] = new_title
+            var_new.set("")
+            refresh_list()
+            self.save()
+            if on_change:
+                on_change()
+        
+        def delete_title():
+            sel = listbox.curselection()
+            if not sel:
+                return
+            idx = sel[0]
+            tid = title_ids[idx]
+            del self.app_data.note_titles_map[tid]
+            refresh_list()
+            self.save()
+            if on_change:
+                on_change()
+        
+        ttk.Button(add_frame, text="Add", command=add_title, width=6).pack(side="left", padx=(4, 0))
+        ttk.Button(add_frame, text="Delete", command=delete_title, width=8).pack(side="left", padx=(4, 0))
+        
+        ttk.Button(frm, text="Close", command=win.destroy).pack(anchor="e")
+    
     def _open_note_editor(self, parent_win, perfume: Perfume, note_idx: Optional[int], on_save):
         """Open note editor dialog for add/edit"""
         is_edit = note_idx is not None
@@ -4588,10 +4732,22 @@ class App(tk.Tk):
         quick_btn_frame = ttk.Frame(frm, style="TFrame")
         quick_btn_frame.pack(fill="x", pady=(0, 8))
         
-        for quick_title in NOTE_QUICK_TITLES:
-            btn = ttk.Button(quick_btn_frame, text=quick_title, 
-                           command=lambda t=quick_title: var_title.set(t), width=10)
-            btn.pack(side="left", padx=(0, 4))
+        def refresh_quick_titles():
+            for widget in quick_btn_frame.winfo_children():
+                widget.destroy()
+            # Get titles from app_data
+            titles = sorted(self.app_data.note_titles_map.values())
+            for quick_title in titles:
+                btn = ttk.Button(quick_btn_frame, text=quick_title, 
+                               command=lambda t=quick_title: var_title.set(t), width=10)
+                btn.pack(side="left", padx=(0, 4))
+            # Manage button
+            ttk.Button(quick_btn_frame, text="⚙", command=manage_titles, width=3).pack(side="left", padx=(8, 0))
+        
+        def manage_titles():
+            self._manage_note_titles(win, refresh_quick_titles)
+        
+        refresh_quick_titles()
         
         # Buttons - pack FIRST at bottom so they don't get pushed out
         btn_frame = ttk.Frame(frm, style="TFrame")
@@ -4943,7 +5099,8 @@ class App(tk.Tk):
         if not messagebox.askyesno("Delete", f"Delete this perfume?\n\n{brand_display} – {p.name}\n\nThis cannot be undone."):
             return
 
-        self.perfumes = [x for x in self.perfumes if x.id != pid]
+        # Remove from app_data.perfumes (must modify in-place to keep reference)
+        self.app_data.perfumes[:] = [x for x in self.app_data.perfumes if x.id != pid]
         self.tree.delete(*self.tree.get_children())
         self.detail_title.config(text="(no selection)")
         self.state_label.config(text="")
