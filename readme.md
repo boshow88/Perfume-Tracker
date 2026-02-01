@@ -76,7 +76,7 @@ python perfume_tracker.py
 
 | Button | Function |
 |--------|----------|
-| Add | Add new perfume |
+| Add | Add new perfume (inserts below current selection) |
 | Manage | Manage master data (Brand/Concentration/Location/Tag/Purchase Type) |
 | Sort | Multi-dimensional sorting (button changes color when active) |
 | Filter | Advanced filtering (button changes color when active) |
@@ -99,7 +99,7 @@ python perfume_tracker.py
 - Double-click a perfume to open the Info edit dialog
 
 ### Right Panel Detail
-- **State**: Displayed as gray text below the title (derived from events)
+- **Concentration · State**: Displayed as gray text below the title (e.g., "EDP · Owned")
 - **Tags**: Displayed as gray text, click to expand popup with full tag list
 
 ---
@@ -137,13 +137,20 @@ Centralized management of 5 data types; rename once, update everywhere:
 - **Rename**: Rename once, all linked perfumes update automatically
 - **Merge**: Combine multiple items into one
 - **Delete**: Only unused items can be deleted
-- **Reorder**: Drag to adjust display order
+- **Reorder**: Manually adjust display order (Custom mode only)
+
+**Sort Modes** (persistent, auto-updates on data change):
+- **Name**: Sort alphabetically (default for Brand, Location)
+- **Count**: Sort by usage count (most used first)
+- **Custom**: Manual order, preserved across sessions (default for Tags, Concentrations, Format)
 
 ### 3. Filter
 
 | Category | Description |
 |----------|-------------|
 | Brand | Dropdown + list display, select from existing items only |
+| Concentration | Dropdown + list display, select from existing items only |
+| Location | Dropdown + list display, match any selected location |
 | State | Owned / Tested / Wishlist multi-select |
 | Season/Time | Spring/Summer/Fall/Winter/Day/Night multi-select |
 | Score | Dual-slider range (min~max), min gap 0.3, Include/Exclude modes |
@@ -202,18 +209,24 @@ Date and Location persist when switching perfumes for batch logging.
 - Gray = Not voted
 - Dark orange = Voted (click option name to vote/unvote)
 
+**Expand/Collapse**:
+- Click ＋/－ on each section to expand/collapse
+- Click ＋＋/－－ next to title to expand/collapse all sections
+- Button auto-updates only at extremes (all expanded → －－, all collapsed → ＋＋)
+
 ### 7. Links & Notes Management
 
 Manage in the Memo dialog:
 
 **Links**:
-- Add/Edit/Delete links with URL and optional label
+- Add/Edit links with URL and optional label (in single dialog)
+- Empty label displays domain name automatically (e.g., "www.fragrantica.com")
 - Reorder with ↑/↓ buttons
 - Click links in right panel to open in browser
 
 **Notes**:
 - Each note has a Title and Content
-- Quick title buttons: "My Notes", "Review"
+- Quick title buttons with ⚙ management (add/delete custom titles)
 - Multi-line content with auto-wrap
 - Reorder with ↑/↓ buttons
 
@@ -273,6 +286,7 @@ concentrations_map: Dict[str, str]   # UUID → Concentration name
 outlets_map: Dict[str, OutletInfo]   # UUID → {name, region}
 tags_map: Dict[str, str]             # UUID → Tag name
 purchase_types_map: Dict[str, str]   # UUID → Purchase type name
+note_titles_map: Dict[str, str]      # UUID → Quick note title
 ```
 
 ---
