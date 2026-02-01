@@ -4080,13 +4080,19 @@ class App(tk.Tk):
                 else:
                     preview = content
                 
-                # Use Label with wraplength for auto-wrap (350px width)
+                # Use Label with dynamic wraplength for auto-wrap
                 content_label = tk.Label(note_frame, text=preview, 
                                        fg=COLORS["text"], bg=COLORS["panel"],
                                        anchor="nw", justify="left",
-                                       wraplength=350,
                                        cursor="hand2" if has_more else "arrow")
                 content_label.pack(fill="x", anchor="w")
+                
+                # Dynamic wraplength - update when frame resizes
+                def update_wraplength(event, label=content_label):
+                    # Use frame width minus some padding
+                    new_width = max(100, event.width - 20)
+                    label.config(wraplength=new_width)
+                note_frame.bind("<Configure>", update_wraplength)
                 
                 if has_more:
                     content_label.bind("<Button-1>", lambda e, n=note: self._show_note_popup(n))
@@ -4273,9 +4279,15 @@ class App(tk.Tk):
         # Partial state: don't change button
     
     def _open_url(self, url: str):
-        """Open URL in default browser"""
-        import webbrowser
-        if url:
+        """Open URL in default browser (uses os.startfile on Windows for better profile handling)"""
+        if not url:
+            return
+        import sys
+        if sys.platform == "win32":
+            import os
+            os.startfile(url)
+        else:
+            import webbrowser
             webbrowser.open(url)
 
     def _on_tree_right_click(self, evt):
