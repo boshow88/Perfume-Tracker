@@ -3470,16 +3470,23 @@ class App(tk.Tk):
         self.fragrantica_title.pack(side="left")
         self.fragrantica_url = ""  # Store current URL
         
-        # Smart expand/collapse toggle button
+        # Smart expand/collapse toggle button (styled like a button)
         self.toggle_all_btn = tk.Label(
             self.fragrantica_title_frame,
             text="＋＋",
-            fg=COLORS["muted"],
-            bg=COLORS["panel"],
-            cursor="hand2"
+            fg=COLORS["text"],
+            bg=COLORS["bg"],
+            cursor="hand2",
+            padx=4,
+            pady=1,
+            relief="groove",
+            borderwidth=1
         )
         self.toggle_all_btn.pack(side="left", padx=(12, 0))
         self.toggle_all_btn.bind("<Button-1>", lambda e: self._smart_toggle_all_vote_blocks())
+        # Hover effect
+        self.toggle_all_btn.bind("<Enter>", lambda e: self.toggle_all_btn.config(bg=COLORS["panel"]))
+        self.toggle_all_btn.bind("<Leave>", lambda e: self.toggle_all_btn.config(bg=COLORS["bg"]))
         
         # Vote blocks (collapsible) - inside scrollable frame
         # Add right padding to avoid content going under scrollbar
