@@ -125,6 +125,8 @@ class SortConfig:
 class FilterConfig:
     """Filter configuration"""
     brands: List[str] = field(default_factory=list)
+    concentrations: List[str] = field(default_factory=list)
+    locations: List[str] = field(default_factory=list)
     states: List[str] = field(default_factory=list)  # "owned", "tested", "wishlist"
     seasons: List[str] = field(default_factory=list)
     times: List[str] = field(default_factory=list)  # "day", "night"
@@ -231,6 +233,11 @@ class AppData:
     tags_map: Dict[str, str] = field(default_factory=dict)             # {id: name}
     purchase_types_map: Dict[str, str] = field(default_factory=dict)   # {id: name}
     note_titles_map: Dict[str, str] = field(default_factory=dict)      # {id: title}
+    # Sort modes for each mapping table: "name", "count", "custom"
+    sort_modes: Dict[str, str] = field(default_factory=lambda: {
+        "brands": "name", "outlets": "name",
+        "tags": "custom", "concentrations": "custom", "purchase_types": "custom"
+    })
 
 
 # Default values for new data types
@@ -333,6 +340,15 @@ def load_app_data() -> AppData:
     app_data.tags_map = raw.get("tags_map", {})
     app_data.purchase_types_map = raw.get("purchase_types_map", {})
     app_data.note_titles_map = raw.get("note_titles_map", {})
+    
+    # Load sort modes (with defaults)
+    default_sort_modes = {"brands": "name", "outlets": "name",
+                          "tags": "custom", "concentrations": "custom", "purchase_types": "custom"}
+    app_data.sort_modes = raw.get("sort_modes", default_sort_modes)
+    # Ensure all keys exist
+    for key in default_sort_modes:
+        if key not in app_data.sort_modes:
+            app_data.sort_modes[key] = "name"
     
     # Load outlets_map (needs special handling for OutletInfo)
     for oid, oinfo in raw.get("outlets_map", {}).items():
@@ -438,6 +454,7 @@ def save_app_data(app_data: AppData):
         "tags_map": app_data.tags_map,
         "purchase_types_map": app_data.purchase_types_map,
         "note_titles_map": app_data.note_titles_map,
+        "sort_modes": app_data.sort_modes,
     }
     
     with open(DB_PATH, "w", encoding="utf-8") as f:
@@ -1749,7 +1766,8 @@ class ManageDataDialog(tk.Toplevel):
         
         self.app = app
         self.current_tab = "brands"
-        self.sort_mode = "name"  # "name", "count", "custom"
+        # Get sort mode from app_data (persistent)
+        self.sort_mode = self.app.app_data.sort_modes.get("brands", "name")
         
         self._build_ui()
         self._refresh_list()
@@ -1773,7 +1791,7 @@ class ManageDataDialog(tk.Toplevel):
         sort_frame.pack(fill="x", padx=10, pady=(0, 5))
         
         ttk.Label(sort_frame, text="Sort:", style="Muted.TLabel").pack(side="left")
-        self.sort_var = tk.StringVar(value="name")
+        self.sort_var = tk.StringVar(value=self.sort_mode)
         for mode, label in [("name", "Name"), ("count", "Count"), ("custom", "Custom")]:
             rb = ttk.Radiobutton(sort_frame, text=label, value=mode, variable=self.sort_var,
                                 command=self._on_sort_change)
@@ -1825,7 +1843,11 @@ class ManageDataDialog(tk.Toplevel):
     
     def _switch_tab(self, tab_id: str):
         self.current_tab = tab_id
+        # Load sort mode for this tab
+        self.sort_mode = self.app.app_data.sort_modes.get(tab_id, "name")
+        self.sort_var.set(self.sort_mode)
         self._update_tab_buttons()
+        self._update_order_buttons()
         self._refresh_list()
     
     def _update_tab_buttons(self):
@@ -1837,6 +1859,9 @@ class ManageDataDialog(tk.Toplevel):
     
     def _on_sort_change(self):
         self.sort_mode = self.sort_var.get()
+        # Save sort mode for this tab (persistent)
+        self.app.app_data.sort_modes[self.current_tab] = self.sort_mode
+        self.app.save()
         self._update_order_buttons()
         self._apply_sort_to_map()  # Reorder the mapping table
         self._refresh_list()
@@ -2164,6 +2189,8 @@ class FilterDialog(tk.Toplevel):
         
         # Variables
         self.brands_selected = list(current_config.brands)  # Pool mode
+        self.concentrations_selected = list(current_config.concentrations)
+        self.locations_selected = list(current_config.locations)
         self.vars_states = {}
         self.vars_seasons = {}
         self.vars_times = {}
@@ -2257,6 +2284,12 @@ class FilterDialog(tk.Toplevel):
         # Brands
         self._create_collapsible_section(content, "Brands", "brands", self._create_brands_section)
         
+        # Concentrations
+        self._create_collapsible_section(content, "Concentrations", "concentrations", self._create_concentrations_section)
+        
+        # Locations
+        self._create_collapsible_section(content, "Locations", "locations", self._create_locations_section)
+        
         # States
         self._create_collapsible_section(content, "States", "states", self._create_states_section)
         
@@ -2336,6 +2369,12 @@ class FilterDialog(tk.Toplevel):
         
         if self.current_config.brands:
             lines.append(f"• Brands: {', '.join(self.current_config.brands)}")
+        
+        if self.current_config.concentrations:
+            lines.append(f"• Concentrations: {', '.join(self.current_config.concentrations)}")
+        
+        if self.current_config.locations:
+            lines.append(f"• Locations: {', '.join(self.current_config.locations)}")
         
         if self.current_config.states:
             states_display = [s.capitalize() for s in self.current_config.states]
@@ -2451,6 +2490,124 @@ class FilterDialog(tk.Toplevel):
         else:
             for brand in self.brands_selected:
                 self.brands_listbox.insert("end", brand)
+    
+    def _create_concentrations_section(self, parent):
+        """Create concentrations pool with Listbox (double-click to remove)"""
+        if self.app:
+            all_concs = list(self.app.app_data.concentrations_map.values())
+        else:
+            all_concs = []
+        
+        # Listbox with scrollbar
+        listbox_frame = ttk.Frame(parent, style="Panel.TFrame")
+        listbox_frame.pack(fill="x", pady=(0, 4))
+        
+        scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical")
+        self.concs_listbox = tk.Listbox(listbox_frame, height=4, yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.concs_listbox.yview)
+        
+        self.concs_listbox.pack(side="left", fill="x", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        self._refresh_concs_listbox()
+        
+        def remove_conc(event):
+            sel = self.concs_listbox.curselection()
+            if sel:
+                self.concentrations_selected.pop(sel[0])
+                self._refresh_concs_listbox()
+                self._update_result_count()
+        
+        self.concs_listbox.bind("<Double-1>", remove_conc)
+        
+        # Add concentration
+        add_frame = ttk.Frame(parent, style="Panel.TFrame")
+        add_frame.pack(fill="x")
+        
+        var_new_conc = tk.StringVar()
+        conc_cb = ttk.Combobox(add_frame, textvariable=var_new_conc, width=25)
+        conc_cb["values"] = all_concs
+        conc_cb.pack(side="left", padx=(0, 8))
+        
+        def add_conc():
+            conc = var_new_conc.get().strip()
+            if conc and conc in all_concs and conc not in self.concentrations_selected:
+                self.concentrations_selected.append(conc)
+                self._refresh_concs_listbox()
+                var_new_conc.set("")
+                self._update_result_count()
+        
+        ttk.Button(add_frame, text="Add", command=add_conc).pack(side="left")
+        conc_cb.bind("<Return>", lambda e: add_conc())
+    
+    def _refresh_concs_listbox(self):
+        """Refresh concentrations listbox"""
+        self.concs_listbox.delete(0, "end")
+        if not self.concentrations_selected:
+            self.concs_listbox.insert("end", "(All concentrations - double-click to remove)")
+        else:
+            for conc in self.concentrations_selected:
+                self.concs_listbox.insert("end", conc)
+    
+    def _create_locations_section(self, parent):
+        """Create locations pool with Listbox (double-click to remove)"""
+        if self.app:
+            all_locs = self.app.get_all_outlet_names()
+        else:
+            all_locs = []
+        
+        # Listbox with scrollbar
+        listbox_frame = ttk.Frame(parent, style="Panel.TFrame")
+        listbox_frame.pack(fill="x", pady=(0, 4))
+        
+        scrollbar = ttk.Scrollbar(listbox_frame, orient="vertical")
+        self.locs_listbox = tk.Listbox(listbox_frame, height=4, yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.locs_listbox.yview)
+        
+        self.locs_listbox.pack(side="left", fill="x", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        self._refresh_locs_listbox()
+        
+        def remove_loc(event):
+            sel = self.locs_listbox.curselection()
+            if sel:
+                self.locations_selected.pop(sel[0])
+                self._refresh_locs_listbox()
+                self._update_result_count()
+        
+        self.locs_listbox.bind("<Double-1>", remove_loc)
+        
+        # Add location
+        add_frame = ttk.Frame(parent, style="Panel.TFrame")
+        add_frame.pack(fill="x")
+        
+        var_new_loc = tk.StringVar()
+        loc_cb = ttk.Combobox(add_frame, textvariable=var_new_loc, width=25)
+        loc_cb["values"] = all_locs
+        if self.app:
+            make_combobox_searchable(loc_cb, all_locs)
+        loc_cb.pack(side="left", padx=(0, 8))
+        
+        def add_loc():
+            loc = var_new_loc.get().strip()
+            if loc and loc in all_locs and loc not in self.locations_selected:
+                self.locations_selected.append(loc)
+                self._refresh_locs_listbox()
+                var_new_loc.set("")
+                self._update_result_count()
+        
+        ttk.Button(add_frame, text="Add", command=add_loc).pack(side="left")
+        loc_cb.bind("<Return>", lambda e: add_loc())
+    
+    def _refresh_locs_listbox(self):
+        """Refresh locations listbox"""
+        self.locs_listbox.delete(0, "end")
+        if not self.locations_selected:
+            self.locs_listbox.insert("end", "(All locations - double-click to remove)")
+        else:
+            for loc in self.locations_selected:
+                self.locs_listbox.insert("end", loc)
     
     def _create_states_section(self, parent):
         """Create states checkboxes with flow layout"""
@@ -2757,6 +2914,8 @@ class FilterDialog(tk.Toplevel):
         """Build filter config from current UI state"""
         return FilterConfig(
             brands=list(self.brands_selected),
+            concentrations=list(self.concentrations_selected),
+            locations=list(self.locations_selected),
             states=[s for s, v in self.vars_states.items() if v.get()],
             seasons=[s for s, v in self.vars_seasons.items() if v.get()],
             times=[t for t, v in self.vars_times.items() if v.get()],
@@ -2911,6 +3070,10 @@ class FilterDialog(tk.Toplevel):
         """Clear all filters"""
         self.brands_selected = []
         self._refresh_brands_listbox()
+        self.concentrations_selected = []
+        self._refresh_concs_listbox()
+        self.locations_selected = []
+        self._refresh_locs_listbox()
         for var in self.vars_states.values():
             var.set(False)
         for var in self.vars_seasons.values():
@@ -3401,8 +3564,70 @@ class App(tk.Tk):
     def save(self):
         for p in self.perfumes:
             p.updated_at = now_ts()
+        # Re-sort mapping tables based on their sort modes
+        self._resort_mappings()
         save_app_data(self.app_data)  # V2: Save with mapping tables
         # Silent save - no popup
+    
+    def _resort_mappings(self):
+        """Re-sort all mapping tables based on their sort modes"""
+        for tab_id in ["brands", "tags", "outlets", "concentrations", "purchase_types"]:
+            sort_mode = self.app_data.sort_modes.get(tab_id, "name")
+            if sort_mode == "custom":
+                continue  # Don't reorder custom mode
+            
+            # Get the mapping
+            if tab_id == "brands":
+                current_map = self.app_data.brands_map
+            elif tab_id == "tags":
+                current_map = self.app_data.tags_map
+            elif tab_id == "outlets":
+                current_map = self.app_data.outlets_map
+            elif tab_id == "concentrations":
+                current_map = self.app_data.concentrations_map
+            elif tab_id == "purchase_types":
+                current_map = self.app_data.purchase_types_map
+            else:
+                continue
+            
+            if not current_map:
+                continue
+            
+            # Build items list with counts
+            items = []
+            for item_id, item in current_map.items():
+                # Get display name
+                if tab_id == "outlets" and isinstance(item, OutletInfo):
+                    name = item.name + (f" ({item.region})" if item.region else "")
+                else:
+                    name = str(item)
+                
+                # Count usage
+                if tab_id == "brands":
+                    count = sum(1 for p in self.perfumes if p.brand_id == item_id)
+                elif tab_id == "tags":
+                    count = sum(1 for p in self.perfumes if item_id in p.tag_ids)
+                elif tab_id == "outlets":
+                    count = sum(1 for p in self.perfumes if item_id in p.outlet_ids)
+                elif tab_id == "concentrations":
+                    count = sum(1 for p in self.perfumes if p.concentration_id == item_id)
+                elif tab_id == "purchase_types":
+                    count = sum(1 for p in self.perfumes for e in p.events if e.purchase_type_id == item_id)
+                else:
+                    count = 0
+                
+                items.append((item_id, item, name, count))
+            
+            # Sort based on mode
+            if sort_mode == "name":
+                items.sort(key=lambda x: x[2].lower())
+            elif sort_mode == "count":
+                items.sort(key=lambda x: (-x[3], x[2].lower()))
+            
+            # Rebuild the mapping dict in new order
+            current_map.clear()
+            for item_id, item, _, _ in items:
+                current_map[item_id] = item
     
     def ui_open_sort(self):
         """Open sort configuration dialog"""
@@ -3438,6 +3663,8 @@ class App(tk.Tk):
         # Check if filter is active (including range filters)
         has_filter = (
             bool(self.filter_config.brands) or
+            bool(self.filter_config.concentrations) or
+            bool(self.filter_config.locations) or
             bool(self.filter_config.states) or
             bool(self.filter_config.seasons) or
             bool(self.filter_config.times) or
@@ -3531,6 +3758,18 @@ class App(tk.Tk):
         brand_name = self.get_brand_name(p.brand_id)
         if config.brands and brand_name not in config.brands:
             return False
+        
+        # Concentrations
+        if config.concentrations:
+            conc_name = self.get_concentration_name(p.concentration_id)
+            if conc_name not in config.concentrations:
+                return False
+        
+        # Locations (match any)
+        if config.locations:
+            location_names = [self.get_outlet_display(oid) for oid in p.outlet_ids]
+            if not any(loc in config.locations for loc in location_names):
+                return False
         
         # States
         if config.states:
@@ -4331,7 +4570,16 @@ class App(tk.Tk):
                 # Create new perfume
                 brand_id = self.find_or_create_brand_id(brand)
                 p = Perfume(id=new_id(), name=name, brand_id=brand_id)
-                self.perfumes.append(p)
+                
+                # Insert below current selection, or append if none selected
+                selected_pid = self._get_selected_id()
+                insert_idx = len(self.perfumes)  # Default: append to end
+                if selected_pid:
+                    for i, existing in enumerate(self.perfumes):
+                        if existing.id == selected_pid:
+                            insert_idx = i + 1
+                            break
+                self.perfumes.insert(insert_idx, p)
             else:
                 p = perfume
                 # Update brand and name
