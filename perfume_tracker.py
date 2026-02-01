@@ -2452,7 +2452,7 @@ class FilterDialog(tk.Toplevel):
         
         def remove_brand(event):
             sel = self.brands_listbox.curselection()
-            if sel:
+            if sel and self.brands_selected:
                 self.brands_selected.pop(sel[0])
                 self._refresh_brands_listbox()
                 self._update_result_count()
@@ -2513,7 +2513,7 @@ class FilterDialog(tk.Toplevel):
         
         def remove_conc(event):
             sel = self.concs_listbox.curselection()
-            if sel:
+            if sel and self.concentrations_selected:
                 self.concentrations_selected.pop(sel[0])
                 self._refresh_concs_listbox()
                 self._update_result_count()
@@ -2571,7 +2571,7 @@ class FilterDialog(tk.Toplevel):
         
         def remove_loc(event):
             sel = self.locs_listbox.curselection()
-            if sel:
+            if sel and self.locations_selected:
                 self.locations_selected.pop(sel[0])
                 self._refresh_locs_listbox()
                 self._update_result_count()
@@ -2789,7 +2789,7 @@ class FilterDialog(tk.Toplevel):
         
         def remove_tag(event):
             sel = self.tags_listbox.curselection()
-            if sel:
+            if sel and self.tags_selected:
                 self.tags_selected.pop(sel[0])
                 self._refresh_tags_listbox()
                 self._update_result_count()
