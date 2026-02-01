@@ -903,7 +903,7 @@ class CollapsibleVoteBlock(ttk.Frame):
             sample_text = "(No data)"
         
         # Update symbol and title separately to avoid text shifting
-        symbol = "−" if self.expanded else "＋"
+        symbol = "－" if self.expanded else "＋"
         self.symbol_label.config(text=symbol)
         self.title_label.config(text=f"{self.title}: {summary}  {sample_text}")
         
@@ -2125,14 +2125,14 @@ class ManageDataDialog(tk.Toplevel):
         
         if used_items:
             messagebox.showwarning("Cannot Delete", 
-                f"Still in use:\n\n" + "\n".join(used_items))
+                f"Still in use:\n\n" + "\n".join(used_items), parent=self)
             return
         
         if not unused_items:
             return
         
         if not messagebox.askyesno("Confirm Delete", 
-            f"Delete {len(unused_items)} items?\n\n" + "\n".join(unused_items)):
+            f"Delete {len(unused_items)} items?\n\n" + "\n".join(unused_items), parent=self):
             return
         
         for sid in selected_ids:
@@ -2141,6 +2141,7 @@ class ManageDataDialog(tk.Toplevel):
         
         self.app.save()
         self._refresh_list()
+        self.app._refresh_list()  # Refresh main list but dialog stays open
     
     def _add_new(self):
         if self.current_tab == "outlets":
@@ -2332,7 +2333,7 @@ class FilterDialog(tk.Toplevel):
         title_frame = ttk.Frame(frame, style="Panel.TFrame")
         title_frame.pack(fill="x", padx=8, pady=6)
         
-        symbol_label = ttk.Label(title_frame, text="−" if initial_expanded else "＋", 
+        symbol_label = ttk.Label(title_frame, text="－" if initial_expanded else "＋", 
                                 style="Panel.TLabel", width=2)
         symbol_label.pack(side="left")
         
@@ -2344,7 +2345,7 @@ class FilterDialog(tk.Toplevel):
         def toggle():
             expanded = var_expanded.get()
             var_expanded.set(not expanded)
-            symbol_label.config(text="−" if not expanded else "＋")
+            symbol_label.config(text="－" if not expanded else "＋")
             # Update persistent state
             self.expanded_state[section_key] = not expanded
             if not expanded:
@@ -3469,6 +3470,17 @@ class App(tk.Tk):
         self.fragrantica_title.pack(side="left")
         self.fragrantica_url = ""  # Store current URL
         
+        # Smart expand/collapse toggle button
+        self.toggle_all_btn = tk.Label(
+            self.fragrantica_title_frame,
+            text="＋＋",
+            fg=COLORS["muted"],
+            bg=COLORS["panel"],
+            cursor="hand2"
+        )
+        self.toggle_all_btn.pack(side="left", padx=(12, 0))
+        self.toggle_all_btn.bind("<Button-1>", lambda e: self._smart_toggle_all_vote_blocks())
+        
         # Vote blocks (collapsible) - inside scrollable frame
         # Add right padding to avoid content going under scrollbar
         self.bars_frame = ttk.Frame(self.scrollable_detail_frame, style="Panel.TFrame")
@@ -3538,6 +3550,7 @@ class App(tk.Tk):
     def _on_section_toggle(self, block_name: str, expanded: bool):
         """Update persistent expand/collapse state"""
         self.expanded_sections[block_name] = expanded
+        self._update_toggle_all_btn()  # Update toggle button state
     
     def _on_mousewheel(self, event):
         """Handle mouse wheel scrolling (prevent over-scrolling)"""
@@ -3695,6 +3708,10 @@ class App(tk.Tk):
         return None
 
     def _refresh_list(self):
+        # Remember current selection before clearing
+        current_selection = self.tree.selection()
+        selected_id = current_selection[0] if current_selection else None
+        
         self.tree.delete(*self.tree.get_children())
 
         # Search query
@@ -3746,8 +3763,12 @@ class App(tk.Tk):
         
         self.filtered_ids = ids
 
-        # Auto-select first row if nothing selected
-        if ids and not self.tree.selection():
+        # Restore previous selection if still in list, otherwise select first
+        if selected_id and selected_id in ids:
+            self.tree.selection_set(selected_id)
+            self.tree.focus(selected_id)
+            self.tree.see(selected_id)  # Ensure visible
+        elif ids:
             self.tree.selection_set(ids[0])
             self.tree.focus(ids[0])
             self._on_select()
@@ -4097,6 +4118,9 @@ class App(tk.Tk):
                 my_votes=my.get(MY_PREFIX + block_name, {}) or {},
                 expanded=self.expanded_sections.get(block_name, False),
             )
+        
+        # Update toggle all button state
+        self._update_toggle_all_btn()
     
     def _show_note_popup(self, note: Note):
         """Show popup window with full note content"""
@@ -4208,6 +4232,38 @@ class App(tk.Tk):
         # Close on Escape
         popup.bind("<Escape>", lambda e: popup.destroy())
         popup.focus_set()
+    
+    def _smart_toggle_all_vote_blocks(self):
+        """Toggle based on current button state: +all -> expand, -all -> collapse"""
+        current_text = self.toggle_all_btn.cget("text")
+        
+        # Determine action based on button text
+        new_state = True if current_text == "＋＋" else False
+        
+        for block in self.vote_blocks.values():
+            block.expanded = new_state
+            block._render()
+        
+        # Update persistent state
+        for block_name in self.vote_blocks:
+            self.expanded_sections[block_name] = new_state
+        
+        self._update_toggle_all_btn()
+    
+    def _update_toggle_all_btn(self):
+        """Update toggle button only at extremes (all expanded or all collapsed)"""
+        if not self.vote_blocks:
+            return
+        
+        all_expanded = all(block.expanded for block in self.vote_blocks.values())
+        all_collapsed = all(not block.expanded for block in self.vote_blocks.values())
+        
+        # Only update at extremes, keep current state for partial
+        if all_expanded:
+            self.toggle_all_btn.config(text="－－")
+        elif all_collapsed:
+            self.toggle_all_btn.config(text="＋＋")
+        # Partial state: don't change button
     
     def _open_url(self, url: str):
         """Open URL in default browser"""
