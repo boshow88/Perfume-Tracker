@@ -101,7 +101,9 @@ python perfume_tracker.py
 - Double-click a perfume to open the Info edit dialog
 
 ### Right Panel Detail
-- **Concentration · State**: Displayed as gray text below the title (e.g., "EdP · Owned")
+- **Brand**: Displayed as title (first line)
+- **Name · Concentration**: Displayed as subtitle (e.g., "Sauvage · EdP")
+- **State**: Displayed as gray text (e.g., "Owned", "Tested")
 - **Tags**: Displayed as gray text, click to expand popup with full tag list
 
 ---

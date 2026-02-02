@@ -3443,8 +3443,8 @@ class App(tk.Tk):
 
         left = ttk.Frame(paned, style="Panel.TFrame")
         right = ttk.Frame(paned, style="Panel.TFrame")
-        paned.add(left, weight=3)
-        paned.add(right, weight=2)
+        paned.add(left, weight=2)
+        paned.add(right, weight=1)
 
         # ===== LEFT PANEL =====
         # Top bar: Buttons + Search
@@ -3458,7 +3458,7 @@ class App(tk.Tk):
         
         # Settings button (⚙)
         settings_btn = tk.Label(top_frame, text="⚙", fg=COLORS["muted"], bg=COLORS["panel"],
-                               cursor="hand2", font=("TkDefaultFont", 12))
+                               cursor="hand2", font=self.font_title)
         settings_btn.pack(side="left", padx=(0, 8))
         settings_btn.bind("<Button-1>", lambda e: self.ui_open_settings())
         
@@ -3562,10 +3562,15 @@ class App(tk.Tk):
         ttk.Button(quick_frame, text="Skin", command=self._quick_skin, width=6).pack(side="left")
 
         # Title
+        # Brand (line 1)
         self.detail_title = ttk.Label(right, text="(no selection)", style="Panel.TLabel", font=self.font_title)
-        self.detail_title.pack(fill="x", padx=10, pady=(0, 2), anchor="w")
+        self.detail_title.pack(fill="x", padx=10, pady=(0, 0), anchor="w")
         
-        # State (derived from events)
+        # Name · Concentration (line 2)
+        self.name_conc_label = ttk.Label(right, text="", style="Panel.TLabel", font=self.font_section)
+        self.name_conc_label.pack(fill="x", padx=10, pady=(0, 2), anchor="w")
+        
+        # State (line 3)
         self.state_label = ttk.Label(right, text="", style="Muted.TLabel")
         self.state_label.pack(fill="x", padx=10, pady=(0, 6), anchor="w")
 
@@ -4157,17 +4162,22 @@ class App(tk.Tk):
 
         # V2: Use brand_id lookup with fallback
         brand_display = self.get_brand_name(p.brand_id)
-        self.detail_title.config(text=f"{brand_display} – {p.name}")
         
-        # Concentration + State (derived from events)
+        # Line 1: Brand
+        self.detail_title.config(text=brand_display if brand_display else "(no brand)")
+        
+        # Line 2: Name · Concentration
+        conc_name = self.get_concentration_name(p.concentration_id)
+        if conc_name:
+            name_conc_text = f"{p.name} · {conc_name}"
+        else:
+            name_conc_text = p.name
+        self.name_conc_label.config(text=name_conc_text)
+        
+        # Line 3: State (derived from events)
         tag_names_for_state = [self.get_tag_name(tid) for tid in p.tag_ids]
         state, _ = derive_state(p, tag_names_for_state)
         state_text = state if state else "New"
-        
-        # Add concentration before state
-        conc_name = self.get_concentration_name(p.concentration_id)
-        if conc_name:
-            state_text = f"{conc_name} · {state_text}"
         self.state_label.config(text=state_text)
         
         # tags - display as gray text, click to expand
@@ -5585,6 +5595,7 @@ class App(tk.Tk):
         self.app_data.perfumes[:] = [x for x in self.app_data.perfumes if x.id != pid]
         self.tree.delete(*self.tree.get_children())
         self.detail_title.config(text="(no selection)")
+        self.name_conc_label.config(text="")
         self.state_label.config(text="")
         # Clear notes display
         for widget in self.notes_display_frame.winfo_children():
