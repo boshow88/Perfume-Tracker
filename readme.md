@@ -99,7 +99,7 @@ python perfume_tracker.py
 - Double-click a perfume to open the Info edit dialog
 
 ### Right Panel Detail
-- **Concentration · State**: Displayed as gray text below the title (e.g., "EDP · Owned")
+- **Concentration · State**: Displayed as gray text below the title (e.g., "EdP · Owned")
 - **Tags**: Displayed as gray text, click to expand popup with full tag list
 
 ---
@@ -129,9 +129,9 @@ Centralized management of 5 data types; rename once, update everywhere:
 |-----|-------------|----------|
 | Brands | Brand names | Dior, Chanel, Tom Ford |
 | Locations | Testing locations (with region) | Sephora (NYC), Nordstrom (LA) |
-| Concentrations | Concentration types | EDP, EDT, Parfum, Extrait |
+| Concentrations | Concentration types | Extrait, Parfum, EdP, EdT, EdC, EF |
 | Tags | Tags | woody, fresh, office, summer |
-| Purchase Types | Purchase types | Full Bottle, Decant, Sample |
+| Purchase Types | Purchase types | Full Bottle, Decant, Gift |
 
 **Functions**:
 - **Rename**: Rename once, all linked perfumes update automatically

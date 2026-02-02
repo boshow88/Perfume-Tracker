@@ -241,7 +241,7 @@ class AppData:
 
 
 # Default values for new data types
-DEFAULT_CONCENTRATIONS = ["Extrait", "Parfum", "EdP", "EdT", "Cologne"]
+DEFAULT_CONCENTRATIONS = ["Extrait", "Parfum", "EdP", "EdT", "EdC", "EF"]
 DEFAULT_PURCHASE_TYPES = ["full", "decant", "gift"]
 
 
