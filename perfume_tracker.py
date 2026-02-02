@@ -246,6 +246,9 @@ class AppData:
 DEFAULT_CONCENTRATIONS = ["Extrait", "Parfum", "EdP", "EdT", "EdC", "EF"]
 DEFAULT_PURCHASE_TYPES = ["full", "decant", "gift"]
 
+# Available font sizes (discrete steps)
+FONT_SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24]
+
 
 # -----------------------------
 # Persistence
@@ -3119,6 +3122,97 @@ class FilterDialog(tk.Toplevel):
 
 
 # -----------------------------
+# Settings Dialog
+# -----------------------------
+class SettingsDialog(tk.Toplevel):
+    """Settings dialog for app preferences with Save/Cancel"""
+    
+    def __init__(self, parent):
+        super().__init__(parent)
+        self.app = parent
+        self.title("Settings")
+        self.configure(bg=COLORS["bg"])
+        self.transient(parent)
+        self.grab_set()
+        
+        # Store original values for cancel/restore
+        self.original_font_size = self.app.font_size
+        
+        self._build_ui()
+        
+        # Auto-size window to fit content, then prevent resize
+        self.update_idletasks()
+        self.minsize(self.winfo_width(), self.winfo_height())
+        self.resizable(False, False)
+        
+        # Handle window close (X button) as Cancel
+        self.protocol("WM_DELETE_WINDOW", self._on_cancel)
+    
+    def _update_window_size(self):
+        """Update window size to fit content after font change"""
+        self.update_idletasks()
+        # Force geometry recalculation
+        self.geometry("")
+    
+    def _build_ui(self):
+        main = ttk.Frame(self, style="TFrame")
+        main.pack(fill="both", expand=True, padx=20, pady=20)
+        
+        # Title
+        ttk.Label(main, text="Settings", style="TLabel", font=self.app.font_title).pack(anchor="w", pady=(0, 16))
+        
+        # Font Size
+        font_frame = ttk.Frame(main, style="TFrame")
+        font_frame.pack(fill="x", pady=(0, 12))
+        
+        ttk.Label(font_frame, text="Font Size:", style="TLabel").pack(side="left")
+        
+        self.font_var = tk.StringVar(value=str(self.app.font_size))
+        font_combo = ttk.Combobox(font_frame, textvariable=self.font_var, 
+                                  values=[str(s) for s in FONT_SIZES],
+                                  state="readonly", width=6)
+        font_combo.pack(side="left", padx=(8, 0))
+        font_combo.bind("<<ComboboxSelected>>", self._on_font_preview)
+        
+        ttk.Label(font_frame, text="pt", style="TLabel").pack(side="left", padx=(4, 0))
+        
+        # Preview hint
+        ttk.Label(main, text="(Changes preview immediately, Save to keep)", 
+                 style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
+        
+        # Save / Cancel buttons
+        btn_frame = ttk.Frame(main, style="TFrame")
+        btn_frame.pack(anchor="e", pady=(20, 0))
+        
+        ttk.Button(btn_frame, text="Cancel", command=self._on_cancel).pack(side="left", padx=(0, 8))
+        ttk.Button(btn_frame, text="Save", command=self._on_save).pack(side="left")
+    
+    def _on_font_preview(self, event=None):
+        """Preview font size change (don't save yet)"""
+        try:
+            new_size = int(self.font_var.get())
+            if new_size in FONT_SIZES and new_size != self.app.font_size:
+                self.app.font_size = new_size
+                self.app._apply_font_size()
+                self._update_window_size()
+        except ValueError:
+            pass
+    
+    def _on_save(self):
+        """Save settings and close"""
+        self.app.app_data.font_size = self.app.font_size
+        self.app.save()
+        self.destroy()
+    
+    def _on_cancel(self):
+        """Restore original settings and close"""
+        if self.app.font_size != self.original_font_size:
+            self.app.font_size = self.original_font_size
+            self.app._apply_font_size()
+        self.destroy()
+
+
+# -----------------------------
 # Main App
 # -----------------------------
 class App(tk.Tk):
@@ -3164,18 +3258,17 @@ class App(tk.Tk):
         # Calculate global max label width for alignment
         self.global_label_width = self._calculate_global_label_width()
         
-        # Font size preference (min 8, max 18)
-        self.font_size = max(8, min(18, self.app_data.font_size))
+        # Font size preference (use discrete sizes from FONT_SIZES)
+        saved_size = self.app_data.font_size
+        if saved_size in FONT_SIZES:
+            self.font_size = saved_size
+        else:
+            # Find closest valid size
+            self.font_size = min(FONT_SIZES, key=lambda x: abs(x - saved_size))
 
         self._build_style()
         self._build_ui()
         self._refresh_list()
-        
-        # Bind Ctrl+MouseWheel for zoom
-        self.bind("<Control-MouseWheel>", self._on_zoom)
-        self.bind("<Control-plus>", lambda e: self._change_font_size(1))
-        self.bind("<Control-minus>", lambda e: self._change_font_size(-1))
-        self.bind("<Control-equal>", lambda e: self._change_font_size(1))  # For keyboards without numpad
 
     # ---- V2: Mapping helper methods ----
     def get_brand_name(self, brand_id: str) -> str:
@@ -3306,11 +3399,12 @@ class App(tk.Tk):
         fs = self.font_size
         
         # Create or update named fonts (these auto-update all widgets using them)
+        # Using proportional sizes: title=1.2x, section=1.1x, small=0.8x
         if not hasattr(self, '_fonts_created'):
             self.font_normal = tkfont.Font(family="TkDefaultFont", size=fs)
             self.font_bold = tkfont.Font(family="TkDefaultFont", size=fs, weight="bold")
             self.font_title = tkfont.Font(family="TkDefaultFont", size=int(fs * 1.2), weight="bold")
-            self.font_small = tkfont.Font(family="TkDefaultFont", size=max(7, int(fs * 0.7)))
+            self.font_small = tkfont.Font(family="TkDefaultFont", size=int(fs * 0.8))
             self.font_section = tkfont.Font(family="TkDefaultFont", size=int(fs * 1.1), weight="bold")
             self._fonts_created = True
         else:
@@ -3318,7 +3412,7 @@ class App(tk.Tk):
             self.font_normal.configure(size=fs)
             self.font_bold.configure(size=fs, weight="bold")
             self.font_title.configure(size=int(fs * 1.2), weight="bold")
-            self.font_small.configure(size=max(7, int(fs * 0.7)))
+            self.font_small.configure(size=int(fs * 0.8))
             self.font_section.configure(size=int(fs * 1.1), weight="bold")
         
         # Global font
@@ -3338,25 +3432,6 @@ class App(tk.Tk):
         if hasattr(self, 'tree'):
             self.tree.configure(style="Treeview")
     
-    def _on_zoom(self, event):
-        """Handle Ctrl+MouseWheel zoom"""
-        if event.delta > 0:
-            self._change_font_size(1)
-        else:
-            self._change_font_size(-1)
-    
-    def _change_font_size(self, delta: int):
-        """Change font size by delta, within limits"""
-        new_size = self.font_size + delta
-        if 8 <= new_size <= 18:
-            self.font_size = new_size
-            self.app_data.font_size = new_size
-            self._apply_font_size()
-            self.save()
-            # Show brief feedback
-            self.title(f"Perfume Tracker - Font: {new_size}pt")
-            self.after(1500, lambda: self.title("Perfume Tracker (tkinter prototype)"))
-
     # ---- UI layout
     def _build_ui(self):
         root = ttk.Frame(self, style="TFrame")
@@ -3381,21 +3456,11 @@ class App(tk.Tk):
         ttk.Button(top_frame, text="Add", command=self.ui_add_perfume).pack(side="left", padx=(0, 4))
         ttk.Button(top_frame, text="Manage", command=self.ui_open_manage_data).pack(side="left", padx=(0, 8))
         
-        # Font zoom - A with up/down arrows
-        font_zoom_frame = ttk.Frame(top_frame, style="Panel.TFrame")
-        font_zoom_frame.pack(side="left", padx=(0, 8))
-        tk.Label(font_zoom_frame, text="A", fg=COLORS["muted"], bg=COLORS["panel"],
-                font=("TkDefaultFont", 10)).pack(side="left")
-        arrow_frame = ttk.Frame(font_zoom_frame, style="Panel.TFrame")
-        arrow_frame.pack(side="left")
-        zoom_up = tk.Label(arrow_frame, text="▲", fg=COLORS["muted"], bg=COLORS["panel"],
-                          cursor="hand2", font=("TkDefaultFont", 6))
-        zoom_up.pack()
-        zoom_up.bind("<Button-1>", lambda e: self._change_font_size(1))
-        zoom_down = tk.Label(arrow_frame, text="▼", fg=COLORS["muted"], bg=COLORS["panel"],
-                            cursor="hand2", font=("TkDefaultFont", 6))
-        zoom_down.pack()
-        zoom_down.bind("<Button-1>", lambda e: self._change_font_size(-1))
+        # Settings button (⚙)
+        settings_btn = tk.Label(top_frame, text="⚙", fg=COLORS["muted"], bg=COLORS["panel"],
+                               cursor="hand2", font=("TkDefaultFont", 12))
+        settings_btn.pack(side="left", padx=(0, 8))
+        settings_btn.bind("<Button-1>", lambda e: self.ui_open_settings())
         
         # Right side: Search button (fixed)
         ttk.Button(top_frame, text="Search", command=self._refresh_list).pack(side="right")
@@ -3760,6 +3825,10 @@ class App(tk.Tk):
     def ui_open_manage_data(self):
         """Open manage data dialog for brands, tags, etc."""
         ManageDataDialog(self, self)
+    
+    def ui_open_settings(self):
+        """Open settings dialog"""
+        SettingsDialog(self)
     
     def _update_button_states(self):
         """Update sort and filter button visual states (using color)"""
