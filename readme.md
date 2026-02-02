@@ -78,9 +78,12 @@ python perfume_tracker.py
 |--------|----------|
 | Add | Add new perfume (inserts below current selection) |
 | Manage | Manage master data (Brand/Concentration/Location/Tag/Purchase Type) |
+| A▲▼ | Font size zoom (8pt ~ 18pt, preference saved) |
 | Sort | Multi-dimensional sorting (button changes color when active) |
 | Filter | Advanced filtering (button changes color when active) |
 | Search | Text search |
+
+**Keyboard shortcuts**: `Ctrl+MouseWheel` or `Ctrl+Plus/Minus` to adjust font size.
 
 ### Right Panel Buttons
 

@@ -23,7 +23,7 @@ from dataclasses import dataclass, asdict, field
 from typing import Dict, List, Optional, Tuple
 
 import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
+from tkinter import ttk, messagebox, simpledialog, font as tkfont
 
 
 # -----------------------------
@@ -238,6 +238,8 @@ class AppData:
         "brands": "name", "outlets": "name",
         "tags": "custom", "concentrations": "custom", "purchase_types": "custom"
     })
+    # UI preferences
+    font_size: int = 10
 
 
 # Default values for new data types
@@ -350,6 +352,9 @@ def load_app_data() -> AppData:
         if key not in app_data.sort_modes:
             app_data.sort_modes[key] = "name"
     
+    # Load font size preference
+    app_data.font_size = raw.get("font_size", 10)
+    
     # Load outlets_map (needs special handling for OutletInfo)
     for oid, oinfo in raw.get("outlets_map", {}).items():
         if isinstance(oinfo, dict):
@@ -455,6 +460,7 @@ def save_app_data(app_data: AppData):
         "purchase_types_map": app_data.purchase_types_map,
         "note_titles_map": app_data.note_titles_map,
         "sort_modes": app_data.sort_modes,
+        "font_size": app_data.font_size,
     }
     
     with open(DB_PATH, "w", encoding="utf-8") as f:
@@ -1138,6 +1144,7 @@ class SortDialog(tk.Toplevel):
         self.title("Sort Configuration")
         self.configure(bg=COLORS["bg"])
         self.resizable(True, True)
+        self.app = parent  # Reference to App for fonts
         
         self.current_config = current_config
         self.on_apply = on_apply
@@ -1155,7 +1162,7 @@ class SortDialog(tk.Toplevel):
         main.pack(padx=20, pady=20, fill="both", expand=True)
         
         # Title
-        ttk.Label(main, text="Sort Configuration", style="TLabel", font=("TkDefaultFont", 12, "bold")).grid(
+        ttk.Label(main, text="Sort Configuration", style="TLabel", font=self.app.font_title).grid(
             row=0, column=0, columnspan=2, sticky="w", pady=(0, 8)
         )
         
@@ -1164,7 +1171,7 @@ class SortDialog(tk.Toplevel):
         active_section.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(0, 16))
         
         ttk.Label(active_section, text="📌 Currently Active", style="Panel.TLabel", 
-                 font=("TkDefaultFont", 10, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+                 font=self.app.font_section).pack(anchor="w", padx=8, pady=(8, 4))
         
         # Display current active sorts using Text widget (like Filter)
         active_text_frame = tk.Text(active_section, height=6, bg=COLORS["panel"], fg=COLORS["text"],
@@ -1193,7 +1200,7 @@ class SortDialog(tk.Toplevel):
         left = ttk.Frame(main, style="Panel.TFrame")
         left.grid(row=2, column=0, sticky="nsew", padx=(0, 10))
         
-        ttk.Label(left, text="Available Dimensions", style="Panel.TLabel", font=("TkDefaultFont", 10, "bold")).pack(pady=(8, 4))
+        ttk.Label(left, text="Available Dimensions", style="Panel.TLabel", font=self.app.font_section).pack(pady=(8, 4))
         self.available_list = tk.Listbox(left, width=20, height=10, bg=COLORS["panel"], fg=COLORS["text"])
         self.available_list.pack(padx=8, pady=8, fill="both", expand=True)
         self.available_list.bind("<Double-1>", self._on_double_click_available)
@@ -1202,7 +1209,7 @@ class SortDialog(tk.Toplevel):
         right = ttk.Frame(main, style="Panel.TFrame")
         right.grid(row=2, column=1, sticky="nsew")
         
-        ttk.Label(right, text="Active Sorts (double-click to remove)", style="Panel.TLabel", font=("TkDefaultFont", 10, "bold")).pack(pady=(8, 4))
+        ttk.Label(right, text="Active Sorts (double-click to remove)", style="Panel.TLabel", font=self.app.font_section).pack(pady=(8, 4))
         
         # Scrollable frame for active sorts
         canvas = tk.Canvas(right, width=320, height=300, bg=COLORS["panel"], highlightthickness=0)
@@ -1407,7 +1414,7 @@ class EditEventsDialog(tk.Toplevel):
         title_frame = ttk.Frame(self, style="TFrame")
         title_frame.pack(fill="x", padx=10, pady=(10, 5))
         ttk.Label(title_frame, text=f"{brand_name} – {self.perfume.name}", 
-                  style="TLabel", font=("TkDefaultFont", 12, "bold")).pack(side="left")
+                  style="TLabel", font=self.app.font_title).pack(side="left")
         
         # Add event buttons
         btn_frame = ttk.Frame(self, style="TFrame")
@@ -2258,7 +2265,7 @@ class FilterDialog(tk.Toplevel):
         main_canvas.bind("<Leave>", lambda e: main_canvas.unbind_all("<MouseWheel>"))
         
         # Title (with right padding for scrollbar)
-        ttk.Label(content, text="Filter Configuration", style="TLabel", font=("TkDefaultFont", 12, "bold")).pack(
+        ttk.Label(content, text="Filter Configuration", style="TLabel", font=self.app.font_title).pack(
             anchor="w", pady=(0, 8), padx=(0, 20)
         )
         
@@ -2267,7 +2274,7 @@ class FilterDialog(tk.Toplevel):
         active_section.pack(fill="x", pady=(0, 16), padx=(0, 20))
         
         ttk.Label(active_section, text="📌 Currently Active", style="Panel.TLabel", 
-                 font=("TkDefaultFont", 10, "bold")).pack(anchor="w", padx=8, pady=(8, 4))
+                 font=self.app.font_section).pack(anchor="w", padx=8, pady=(8, 4))
         
         # Display current active filters
         active_text_frame = tk.Text(active_section, height=6, bg=COLORS["panel"], fg=COLORS["text"],
@@ -2311,7 +2318,7 @@ class FilterDialog(tk.Toplevel):
         
         # Result count (with right padding)
         self.result_label = ttk.Label(content, text="Result: Calculating...", style="TLabel", 
-                                     font=("TkDefaultFont", 10, "bold"))
+                                     font=self.app.font_section)
         self.result_label.pack(anchor="w", pady=(16, 0), padx=(0, 20))
         
         # Buttons (with right padding)
@@ -2337,7 +2344,7 @@ class FilterDialog(tk.Toplevel):
                                 style="Panel.TLabel", width=2)
         symbol_label.pack(side="left")
         
-        title_label = ttk.Label(title_frame, text=title, style="Panel.TLabel", font=("TkDefaultFont", 10, "bold"))
+        title_label = ttk.Label(title_frame, text=title, style="Panel.TLabel", font=self.app.font_section)
         title_label.pack(side="left", padx=(4, 0))
         
         content_frame = ttk.Frame(frame, style="Panel.TFrame")
@@ -3156,10 +3163,19 @@ class App(tk.Tk):
         
         # Calculate global max label width for alignment
         self.global_label_width = self._calculate_global_label_width()
+        
+        # Font size preference (min 8, max 18)
+        self.font_size = max(8, min(18, self.app_data.font_size))
 
         self._build_style()
         self._build_ui()
         self._refresh_list()
+        
+        # Bind Ctrl+MouseWheel for zoom
+        self.bind("<Control-MouseWheel>", self._on_zoom)
+        self.bind("<Control-plus>", lambda e: self._change_font_size(1))
+        self.bind("<Control-minus>", lambda e: self._change_font_size(-1))
+        self.bind("<Control-equal>", lambda e: self._change_font_size(1))  # For keyboards without numpad
 
     # ---- V2: Mapping helper methods ----
     def get_brand_name(self, brand_id: str) -> str:
@@ -3271,19 +3287,75 @@ class App(tk.Tk):
 
     # ---- styling
     def _build_style(self):
-        style = ttk.Style(self)
-        style.theme_use("clam")
-        style.configure("TFrame", background=COLORS["bg"])
-        style.configure("Panel.TFrame", background=COLORS["panel"])
-        style.configure("TLabel", background=COLORS["bg"], foreground=COLORS["text"])
-        style.configure("Panel.TLabel", background=COLORS["panel"], foreground=COLORS["text"])
-        style.configure("Muted.TLabel", background=COLORS["bg"], foreground=COLORS["muted"])
-        style.configure("TButton", padding=6)
-        style.configure("Treeview", background=COLORS["panel"], fieldbackground=COLORS["panel"], foreground=COLORS["text"])
-        style.configure("Treeview.Heading", background=COLORS["bg"], foreground=COLORS["text"])
-        style.map("Treeview", background=[("selected", "#2B3A55")])
+        self.style = ttk.Style(self)
+        self.style.theme_use("clam")
+        self.style.configure("TFrame", background=COLORS["bg"])
+        self.style.configure("Panel.TFrame", background=COLORS["panel"])
+        self.style.configure("TLabel", background=COLORS["bg"], foreground=COLORS["text"])
+        self.style.configure("Panel.TLabel", background=COLORS["panel"], foreground=COLORS["text"])
+        self.style.configure("Muted.TLabel", background=COLORS["bg"], foreground=COLORS["muted"])
+        self.style.configure("TButton", padding=6)
+        self.style.configure("Treeview", background=COLORS["panel"], fieldbackground=COLORS["panel"], foreground=COLORS["text"])
+        self.style.configure("Treeview.Heading", background=COLORS["bg"], foreground=COLORS["text"])
+        self.style.map("Treeview", background=[("selected", "#2B3A55")])
 
-        self.option_add("*Font", ("TkDefaultFont", 10))
+        self._apply_font_size()
+
+    def _apply_font_size(self):
+        """Apply current font size to all UI elements using named fonts"""
+        fs = self.font_size
+        
+        # Create or update named fonts (these auto-update all widgets using them)
+        if not hasattr(self, '_fonts_created'):
+            self.font_normal = tkfont.Font(family="TkDefaultFont", size=fs)
+            self.font_bold = tkfont.Font(family="TkDefaultFont", size=fs, weight="bold")
+            self.font_title = tkfont.Font(family="TkDefaultFont", size=int(fs * 1.2), weight="bold")
+            self.font_small = tkfont.Font(family="TkDefaultFont", size=max(7, int(fs * 0.7)))
+            self.font_section = tkfont.Font(family="TkDefaultFont", size=int(fs * 1.1), weight="bold")
+            self._fonts_created = True
+        else:
+            # Update existing fonts (automatically updates all widgets using them)
+            self.font_normal.configure(size=fs)
+            self.font_bold.configure(size=fs, weight="bold")
+            self.font_title.configure(size=int(fs * 1.2), weight="bold")
+            self.font_small.configure(size=max(7, int(fs * 0.7)))
+            self.font_section.configure(size=int(fs * 1.1), weight="bold")
+        
+        # Global font
+        self.option_add("*Font", self.font_normal)
+        
+        # ttk styles with font
+        self.style.configure("TLabel", font=self.font_normal)
+        self.style.configure("Panel.TLabel", font=self.font_normal)
+        self.style.configure("Muted.TLabel", font=self.font_normal)
+        self.style.configure("TButton", font=self.font_normal)
+        self.style.configure("TEntry", font=self.font_normal)
+        self.style.configure("TCombobox", font=self.font_normal)
+        self.style.configure("Treeview", font=self.font_normal, rowheight=int(fs * 2))
+        self.style.configure("Treeview.Heading", font=self.font_bold)
+        
+        # Update Treeview row height based on font size
+        if hasattr(self, 'tree'):
+            self.tree.configure(style="Treeview")
+    
+    def _on_zoom(self, event):
+        """Handle Ctrl+MouseWheel zoom"""
+        if event.delta > 0:
+            self._change_font_size(1)
+        else:
+            self._change_font_size(-1)
+    
+    def _change_font_size(self, delta: int):
+        """Change font size by delta, within limits"""
+        new_size = self.font_size + delta
+        if 8 <= new_size <= 18:
+            self.font_size = new_size
+            self.app_data.font_size = new_size
+            self._apply_font_size()
+            self.save()
+            # Show brief feedback
+            self.title(f"Perfume Tracker - Font: {new_size}pt")
+            self.after(1500, lambda: self.title("Perfume Tracker (tkinter prototype)"))
 
     # ---- UI layout
     def _build_ui(self):
@@ -3304,17 +3376,29 @@ class App(tk.Tk):
         top_frame = ttk.Frame(left, style="Panel.TFrame")
         top_frame.pack(fill="x", padx=8, pady=(8, 4))
         
-        # Left side: Add + Manage
+        # Pack order determines shrink priority (last packed with expand shrinks first)
+        # Left side: Add + Manage + Font zoom (fixed, won't shrink)
         ttk.Button(top_frame, text="Add", command=self.ui_add_perfume).pack(side="left", padx=(0, 4))
-        ttk.Button(top_frame, text="Manage", command=self.ui_open_manage_data).pack(side="left", padx=(0, 12))
+        ttk.Button(top_frame, text="Manage", command=self.ui_open_manage_data).pack(side="left", padx=(0, 8))
         
-        # Right side: Sort + Filter + Search (pack in reverse order)
+        # Font zoom - A with up/down arrows
+        font_zoom_frame = ttk.Frame(top_frame, style="Panel.TFrame")
+        font_zoom_frame.pack(side="left", padx=(0, 8))
+        tk.Label(font_zoom_frame, text="A", fg=COLORS["muted"], bg=COLORS["panel"],
+                font=("TkDefaultFont", 10)).pack(side="left")
+        arrow_frame = ttk.Frame(font_zoom_frame, style="Panel.TFrame")
+        arrow_frame.pack(side="left")
+        zoom_up = tk.Label(arrow_frame, text="▲", fg=COLORS["muted"], bg=COLORS["panel"],
+                          cursor="hand2", font=("TkDefaultFont", 6))
+        zoom_up.pack()
+        zoom_up.bind("<Button-1>", lambda e: self._change_font_size(1))
+        zoom_down = tk.Label(arrow_frame, text="▼", fg=COLORS["muted"], bg=COLORS["panel"],
+                            cursor="hand2", font=("TkDefaultFont", 6))
+        zoom_down.pack()
+        zoom_down.bind("<Button-1>", lambda e: self._change_font_size(-1))
+        
+        # Right side: Search button (fixed)
         ttk.Button(top_frame, text="Search", command=self._refresh_list).pack(side="right")
-        
-        self.var_search = tk.StringVar(value="")
-        search_entry = ttk.Entry(top_frame, textvariable=self.var_search)
-        search_entry.pack(side="right", fill="x", expand=True, padx=(2, 4))
-        search_entry.bind("<Return>", lambda e: self._refresh_list())
         
         # Filter button (color changes when active)
         self.filter_button = tk.Button(top_frame, text="Filter", command=self.ui_open_filter,
@@ -3326,7 +3410,13 @@ class App(tk.Tk):
         self.sort_button = tk.Button(top_frame, text="Sort", command=self.ui_open_sort,
                                      bg=COLORS["panel"], fg=COLORS["text"],
                                      relief="groove", borderwidth=2, padx=6, pady=2)
-        self.sort_button.pack(side="right", padx=(0, 2))
+        self.sort_button.pack(side="right", padx=(0, 4))
+        
+        # Search entry - packed LAST so it shrinks FIRST when space is tight
+        self.var_search = tk.StringVar(value="")
+        search_entry = ttk.Entry(top_frame, textvariable=self.var_search)
+        search_entry.pack(side="right", fill="x", expand=True, padx=(0, 4))
+        search_entry.bind("<Return>", lambda e: self._refresh_list())
 
         # Treeview with new columns
         tree_frame = ttk.Frame(left, style="Panel.TFrame")
@@ -3407,7 +3497,7 @@ class App(tk.Tk):
         ttk.Button(quick_frame, text="Skin", command=self._quick_skin, width=6).pack(side="left")
 
         # Title
-        self.detail_title = ttk.Label(right, text="(no selection)", style="Panel.TLabel", font=("TkDefaultFont", 12, "bold"))
+        self.detail_title = ttk.Label(right, text="(no selection)", style="Panel.TLabel", font=self.font_title)
         self.detail_title.pack(fill="x", padx=10, pady=(0, 2), anchor="w")
         
         # State (derived from events)
@@ -3464,7 +3554,7 @@ class App(tk.Tk):
             text="Fragrantica", 
             fg=COLORS["accent"], 
             bg=COLORS["panel"],
-            font=("TkDefaultFont", 10, "bold"),
+            font=self.font_section,
             anchor="w"
         )
         self.fragrantica_title.pack(side="left")
@@ -4061,7 +4151,7 @@ class App(tk.Tk):
                 # Title on its own line
                 title_label = tk.Label(note_frame, text=note.title, 
                                       fg=COLORS["accent"], bg=COLORS["panel"],
-                                      font=("TkDefaultFont", 9, "bold"), anchor="w")
+                                      font=self.font_bold, anchor="w")
                 title_label.pack(fill="x")
                 
                 # Content - preserve newlines, auto-wrap long lines
@@ -4145,7 +4235,7 @@ class App(tk.Tk):
         
         # Title
         title_label = tk.Label(popup, text=note.title, 
-                              font=("TkDefaultFont", 11, "bold"),
+                              font=self.font_section,
                               fg=COLORS["accent"], bg=COLORS["panel"])
         title_label.pack(anchor="w", padx=15, pady=(15, 5))
         
@@ -4155,7 +4245,7 @@ class App(tk.Tk):
         
         text_widget = tk.Text(text_frame, wrap="word", 
                              bg=COLORS["panel"], fg=COLORS["text"],
-                             font=("TkDefaultFont", 10),
+                             font=self.font_normal,
                              relief="flat", padx=5, pady=5)
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
         text_widget.configure(yscrollcommand=scrollbar.set)
@@ -4721,7 +4811,7 @@ class App(tk.Tk):
 
         brand_display = self.get_brand_name(p.brand_id)
         ttk.Label(frm, text=f"{brand_display} – {p.name}", style="TLabel", 
-                  font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 12))
+                  font=self.font_title).pack(anchor="w", pady=(0, 12))
 
         # === Links ===
         links_frame = ttk.LabelFrame(frm, text="Links", style="TLabelframe")
@@ -5083,7 +5173,7 @@ class App(tk.Tk):
         content_frame.pack(fill="both", expand=True)
         
         content_text = tk.Text(content_frame, wrap="word", 
-                              font=("TkDefaultFont", 10),
+                              font=self.font_normal,
                               bg=COLORS["bg"], fg=COLORS["text"])
         content_scrollbar = ttk.Scrollbar(content_frame, orient="vertical", command=content_text.yview)
         content_text.configure(yscrollcommand=content_scrollbar.set)
@@ -5287,7 +5377,7 @@ class App(tk.Tk):
         main_frame.pack(fill="both", expand=True, padx=12, pady=12)
 
         brand_display = self.get_brand_name(p.brand_id)
-        ttk.Label(main_frame, text=f"{brand_display} – {p.name}", style="TLabel", font=("TkDefaultFont", 12, "bold")).pack(anchor="w", pady=(0, 10))
+        ttk.Label(main_frame, text=f"{brand_display} – {p.name}", style="TLabel", font=self.font_title).pack(anchor="w", pady=(0, 10))
         
         # URL input
         url_frame = ttk.Frame(main_frame, style="TFrame")
