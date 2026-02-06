@@ -1666,9 +1666,13 @@ class EditEventsDialog(tk.Toplevel):
             if e.location:
                 details.append(f"@{e.location}")
             if e.ml_delta is not None:
-                details.append(f"{e.ml_delta:+.0f}ml")
+                # Show 1 decimal if needed, otherwise integer
+                ml_str = f"{e.ml_delta:+.1f}".rstrip('0').rstrip('.')
+                details.append(f"{ml_str}ml")
             if e.price is not None:
-                details.append(f"${e.price:.0f}")
+                # Show 1 decimal if needed, otherwise integer
+                price_str = f"{e.price:.1f}".rstrip('0').rstrip('.')
+                details.append(f"${price_str}")
             if e.purchase_type:
                 details.append(f"[{e.purchase_type}]")
             detail_str = " ".join(details)
@@ -1787,10 +1791,11 @@ class EditEventsDialog(tk.Toplevel):
             ttk.Button(ml_btns, text=txt, width=3, 
                       command=lambda v=val: var_ml.set(v)).pack(side="left", padx=1)
         
-        # Price (positive only)
+        # Price (non-negative, blank = not entered)
         ttk.Label(frm, text="Price:", style="TLabel").grid(row=3, column=0, sticky="e", padx=(0, 8), pady=6)
-        default_price = edit_event.price if is_edit and edit_event.price else 0
-        var_price = tk.StringVar(value=str(default_price))
+        # Show blank if None, otherwise show the number (including 0)
+        default_price_str = "" if (not is_edit or edit_event.price is None) else str(edit_event.price)
+        var_price = tk.StringVar(value=default_price_str)
         price_entry = ttk.Entry(frm, textvariable=var_price, width=10)
         price_entry.grid(row=3, column=1, sticky="w", pady=6)
         
@@ -1815,15 +1820,19 @@ class EditEventsDialog(tk.Toplevel):
                 messagebox.showwarning("Invalid", "ML must be a number.")
                 return
             
-            # Validate Price - must be positive number
-            try:
-                price = float(var_price.get() or "0")
-                if price < 0:
-                    messagebox.showwarning("Invalid", "Price must be a positive number.")
+            # Validate Price - must be non-negative number (blank = None, 0 = free)
+            price_str = var_price.get().strip()
+            if price_str == "":
+                price = None  # Blank means no price entered
+            else:
+                try:
+                    price = float(price_str)
+                    if price < 0:
+                        messagebox.showwarning("Invalid", "Price must be a non-negative number.")
+                        return
+                except ValueError:
+                    messagebox.showwarning("Invalid", "Price must be a number.")
                     return
-            except ValueError:
-                messagebox.showwarning("Invalid", "Price must be a number.")
-                return
             
             date_val = var_date.get().strip()
             # Validate date format if provided
@@ -1838,7 +1847,7 @@ class EditEventsDialog(tk.Toplevel):
                 # Update existing event
                 edit_event.purchase_type = var_format.get().strip()
                 edit_event.ml_delta = ml if event_type == "buy" else -ml if ml else None
-                edit_event.price = price if price else None
+                edit_event.price = price  # None if blank, 0 if free, or actual price
                 edit_event.note = var_note.get().strip()
                 edit_event.event_date = date_val
                 self.app.save()
@@ -4736,7 +4745,7 @@ class App(tk.Tk):
         self.save()
     
     def _add_event_transaction(self, perfume: "Perfume", event_type: str, 
-                                item_type: str = "", ml: float = 0, price: float = 0, note: str = "", event_date: str = ""):
+                                item_type: str = "", ml: float = 0, price: Optional[float] = None, note: str = "", event_date: str = ""):
         """Add buy/sell type event"""
         e = Event(
             id=new_id(),
@@ -4744,7 +4753,7 @@ class App(tk.Tk):
             event_type=event_type,
             timestamp=now_ts(),
             ml_delta=ml if event_type == "buy" else -ml if ml else None,
-            price=price if price else None,
+            price=price,  # None if not entered, 0 if free, or actual price
             purchase_type=item_type.strip(),
             note=note.strip(),
             event_date=event_date.strip(),
@@ -5000,9 +5009,11 @@ class App(tk.Tk):
             p.tag_ids = [self.find_or_create_tag_id(name) for name in selected_tag_names]
             
             self._refresh_list()
-            self.tree.selection_set(p.id)
-            self.tree.focus(p.id)
-            self._on_select()
+            # Only select if item is visible (not filtered out)
+            if p.id in self.filtered_ids:
+                self.tree.selection_set(p.id)
+                self.tree.focus(p.id)
+                self._on_select()
             self.save()
             win.destroy()
         
@@ -5492,9 +5503,10 @@ class App(tk.Tk):
         p.events.append(e)
 
         self._refresh_list()
-        self.tree.selection_set(p.id)
-        self.tree.focus(p.id)
-        self._on_select()
+        if p.id in self.filtered_ids:
+            self.tree.selection_set(p.id)
+            self.tree.focus(p.id)
+            self._on_select()
         self.save()
 
     def quick_buy(self, ml_delta: float):
@@ -5530,9 +5542,10 @@ class App(tk.Tk):
         p.events.append(e)
 
         self._refresh_list()
-        self.tree.selection_set(p.id)
-        self.tree.focus(p.id)
-        self._on_select()
+        if p.id in self.filtered_ids:
+            self.tree.selection_set(p.id)
+            self.tree.focus(p.id)
+            self._on_select()
         self.save()
 
     def set_my_vote(self, perfume_id: str, block_name: str, keys: List[str], chosen_key: Optional[str]):
