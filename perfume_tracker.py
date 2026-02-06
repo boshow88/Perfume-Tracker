@@ -1732,6 +1732,7 @@ class EditEventsDialog(tk.Toplevel):
             else:
                 self.app._add_event_simple(self.perfume, event_type, loc_str, var_note.get(), date_val)
             self._refresh_list()
+            self.app._on_select()  # Refresh main window to update state
             win.destroy()
         
         ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side="right")
@@ -1848,6 +1849,7 @@ class EditEventsDialog(tk.Toplevel):
                     var_format.get(), ml, price, var_note.get(), date_val
                 )
             self._refresh_list()
+            self.app._on_select()  # Refresh main window to update owned ml
             win.destroy()
         
         ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side="right")
@@ -1897,6 +1899,7 @@ class EditEventsDialog(tk.Toplevel):
             self.app._delete_event(self.perfume, event_id)
         
         self._refresh_list()
+        self.app._on_select()  # Refresh main window to update state/ml
 
 
 # -----------------------------
