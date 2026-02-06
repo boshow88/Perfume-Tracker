@@ -147,7 +147,7 @@ function renderPerfumeList() {
         const brand = brandsMap[p.brand_id] || '未知品牌';
         const conc = concentrationsMap[p.concentration_id] || '';
         const locations = (p.outlet_ids || [])
-            .map(id => outletsMap[id])
+            .map(id => outletsMap[id]?.name || '')
             .filter(Boolean)
             .join(', ');
         
@@ -545,11 +545,11 @@ function populateFilterOptions() {
         .map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`)
         .join('');
     
-    // Locations
+    // Locations (outletsMap values are {name, region} objects)
     const locSelect = document.getElementById('filter-location');
     locSelect.innerHTML = Object.entries(outletsMap)
-        .sort((a, b) => a[1].localeCompare(b[1], 'zh-TW'))
-        .map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`)
+        .sort((a, b) => (a[1].name || '').localeCompare(b[1].name || '', 'zh-TW'))
+        .map(([id, info]) => `<option value="${id}">${escapeHtml(info.name || '')}</option>`)
         .join('');
     
     // Tags
@@ -609,7 +609,7 @@ function updateActiveFiltersDisplay() {
         tags.push({ type: 'concentration', id, label: concentrationsMap[id] || id });
     });
     filters.locations.forEach(id => {
-        tags.push({ type: 'location', id, label: outletsMap[id] || id });
+        tags.push({ type: 'location', id, label: outletsMap[id]?.name || id });
     });
     filters.tags.forEach(id => {
         tags.push({ type: 'tag', id, label: tagsMap[id] || id });
