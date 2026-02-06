@@ -102,8 +102,9 @@ def make_combobox_searchable(combobox: ttk.Combobox, all_values: list):
 # -----------------------------
 # Data model
 # -----------------------------
-def now_ts() -> int:
-    return int(time.time())
+def now_ts() -> str:
+    """Return current timestamp as ISO format string (microsecond precision)"""
+    return datetime.now().isoformat()
 
 
 def new_id() -> str:
@@ -1608,17 +1609,7 @@ class EditEventsDialog(tk.Toplevel):
     
     def _get_timestamp_str(self, event: Event) -> str:
         """Get timestamp as comparable string (ISO format)"""
-        ts = event.timestamp
-        if ts:
-            if isinstance(ts, str):
-                return ts
-            elif isinstance(ts, (int, float)):
-                try:
-                    dt = datetime.fromtimestamp(ts)
-                    return dt.isoformat()
-                except:
-                    pass
-        return ""
+        return event.timestamp or ""
     
     def _get_sort_key(self, event: Event) -> str:
         """
