@@ -99,12 +99,14 @@ python perfume_tracker.py
 - **Toggleable**: Concentration, Location
 - Right-click on header to toggle column visibility
 - Double-click a perfume to open the Info edit dialog
+- **Hover tooltip**: Hover on any cell to see full content (useful for truncated text)
 
 ### Right Panel Detail
-- **Brand**: Displayed as title (first line)
-- **Name · Concentration**: Displayed as subtitle (e.g., "Sauvage · EdP")
+- **Brand**: Displayed as title (first line), hover for full text
+- **Name · Concentration**: Displayed as subtitle (e.g., "Sauvage · EdP"), hover for full text
 - **State**: Displayed as gray text (e.g., "Owned", "Tested")
 - **Tags**: Displayed as gray text, click to expand popup with full tag list
+- **Links**: Click to open, hover for full URL
 
 ---
 
