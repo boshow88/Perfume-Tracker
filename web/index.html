@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Perfume Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&family=Cormorant+Garamond:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <h1 class="logo">Perfume Tracker</h1>
+            <div class="header-actions">
+                <button id="filter-btn" class="btn btn-filter">
+                    <span class="icon">⚙</span>
+                    <span class="label">篩選</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Search & Sort Bar -->
+        <div class="toolbar">
+            <div class="search-box">
+                <input type="text" id="search-input" placeholder="搜尋香水...">
+                <span class="search-icon">🔍</span>
+            </div>
+            <div class="sort-box">
+                <label>排序：</label>
+                <select id="sort-select">
+                    <option value="brand">品牌</option>
+                    <option value="name">名稱</option>
+                    <option value="concentration">濃度</option>
+                    <option value="created">新增時間</option>
+                </select>
+                <button id="sort-dir-btn" class="btn btn-icon" title="切換排序方向">▲</button>
+            </div>
+        </div>
+
+        <!-- Filter Tags Display -->
+        <div id="active-filters" class="active-filters hidden"></div>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Perfume List -->
+            <section class="perfume-list-section">
+                <div class="list-header">
+                    <span class="col-brand">品牌</span>
+                    <span class="col-name">名稱</span>
+                    <span class="col-conc">濃度</span>
+                    <span class="col-location">位置</span>
+                </div>
+                <div id="perfume-list" class="perfume-list">
+                    <div class="loading">載入中...</div>
+                </div>
+                <div class="list-footer">
+                    <span id="perfume-count">0 支香水</span>
+                </div>
+            </section>
+
+            <!-- Detail Panel -->
+            <aside id="detail-panel" class="detail-panel hidden">
+                <button id="close-detail" class="btn-close">✕</button>
+                
+                <div class="detail-header">
+                    <h2 id="detail-brand" class="detail-brand"></h2>
+                    <h3 id="detail-name-conc" class="detail-name-conc"></h3>
+                    <p id="detail-state" class="detail-state"></p>
+                </div>
+
+                <!-- Notes Section -->
+                <section id="notes-section" class="detail-section hidden">
+                    <h4 class="section-title">筆記</h4>
+                    <div id="notes-content" class="notes-content"></div>
+                </section>
+
+                <!-- Fragrantica Section -->
+                <section id="fragrantica-section" class="detail-section hidden">
+                    <div class="fragrantica-header">
+                        <h4 class="section-title">Fragrantica 投票</h4>
+                        <button id="toggle-all-votes" class="btn btn-small">＋＋</button>
+                    </div>
+                    <div id="fragrantica-content" class="fragrantica-content"></div>
+                </section>
+
+                <!-- Events Section -->
+                <section id="events-section" class="detail-section hidden">
+                    <h4 class="section-title">購買紀錄</h4>
+                    <div id="events-content" class="events-content"></div>
+                </section>
+
+                <!-- Links Section -->
+                <section id="links-section" class="detail-section hidden">
+                    <h4 class="section-title">連結</h4>
+                    <div id="links-content" class="links-content"></div>
+                </section>
+
+                <!-- Tags Section -->
+                <section id="tags-section" class="detail-section hidden">
+                    <h4 class="section-title">標籤</h4>
+                    <div id="tags-content" class="tags-content"></div>
+                </section>
+            </aside>
+        </main>
+
+        <!-- Filter Modal -->
+        <div id="filter-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>篩選條件</h3>
+                    <button class="btn-close modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <!-- Brand Filter -->
+                    <div class="filter-group">
+                        <label>品牌</label>
+                        <select id="filter-brand" multiple></select>
+                    </div>
+                    <!-- Concentration Filter -->
+                    <div class="filter-group">
+                        <label>濃度</label>
+                        <select id="filter-concentration" multiple></select>
+                    </div>
+                    <!-- Location Filter -->
+                    <div class="filter-group">
+                        <label>位置</label>
+                        <select id="filter-location" multiple></select>
+                    </div>
+                    <!-- Tag Filter -->
+                    <div class="filter-group">
+                        <label>標籤</label>
+                        <select id="filter-tag" multiple></select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="filter-clear" class="btn btn-secondary">清除全部</button>
+                    <button id="filter-apply" class="btn btn-primary">套用</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

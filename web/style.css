@@ -1,0 +1,842 @@
+/* ========================================
+   Perfume Tracker - Web Version
+   Color scheme inspired by the desktop app
+   ======================================== */
+
+:root {
+    /* Colors - Dark theme similar to desktop */
+    --bg-primary: #1a1a2e;
+    --bg-secondary: #16213e;
+    --bg-tertiary: #0f0f1a;
+    --bg-card: #1f1f3a;
+    --bg-hover: #2a2a4a;
+    --bg-selected: #3a3a5a;
+    
+    --text-primary: #e8e8e8;
+    --text-secondary: #a0a0b0;
+    --text-muted: #707080;
+    --text-accent: #8b9dc3;
+    
+    --border-color: #3a3a5a;
+    --border-light: #2a2a4a;
+    
+    --accent-primary: #6c5ce7;
+    --accent-secondary: #a29bfe;
+    --accent-success: #00b894;
+    --accent-warning: #fdcb6e;
+    --accent-danger: #e17055;
+    
+    /* Typography */
+    --font-display: 'Cormorant Garamond', serif;
+    --font-body: 'Noto Sans TC', -apple-system, BlinkMacSystemFont, sans-serif;
+    
+    /* Spacing */
+    --space-xs: 4px;
+    --space-sm: 8px;
+    --space-md: 16px;
+    --space-lg: 24px;
+    --space-xl: 32px;
+    
+    /* Border radius */
+    --radius-sm: 4px;
+    --radius-md: 8px;
+    --radius-lg: 12px;
+    
+    /* Transitions */
+    --transition-fast: 150ms ease;
+    --transition-normal: 250ms ease;
+}
+
+/* ========================================
+   Reset & Base
+   ======================================== */
+
+*, *::before, *::after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    font-size: 16px;
+    -webkit-text-size-adjust: 100%;
+}
+
+body {
+    font-family: var(--font-body);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    line-height: 1.6;
+    min-height: 100vh;
+    overflow-x: hidden;
+}
+
+/* ========================================
+   App Container
+   ======================================== */
+
+#app {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+/* ========================================
+   Header
+   ======================================== */
+
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    position: sticky;
+    top: 0;
+    z-index: 100;
+}
+
+.logo {
+    font-family: var(--font-display);
+    font-size: 1.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: 0.02em;
+}
+
+.header-actions {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+/* ========================================
+   Buttons
+   ======================================== */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-secondary);
+}
+
+.btn-primary {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.btn-primary:hover {
+    background: var(--accent-secondary);
+    border-color: var(--accent-secondary);
+}
+
+.btn-secondary {
+    background: transparent;
+}
+
+.btn-icon {
+    padding: var(--space-sm);
+    min-width: 36px;
+    justify-content: center;
+}
+
+.btn-small {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: 0.8rem;
+}
+
+.btn-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 1.2rem;
+    cursor: pointer;
+    padding: var(--space-xs);
+    transition: color var(--transition-fast);
+}
+
+.btn-close:hover {
+    color: var(--text-primary);
+}
+
+.btn-filter.active {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+/* ========================================
+   Toolbar (Search & Sort)
+   ======================================== */
+
+.toolbar {
+    display: flex;
+    gap: var(--space-md);
+    padding: var(--space-md) var(--space-lg);
+    background: var(--bg-tertiary);
+    flex-wrap: wrap;
+}
+
+.search-box {
+    flex: 1;
+    min-width: 200px;
+    position: relative;
+}
+
+.search-box input {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    padding-left: 40px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-size: 1rem;
+    font-family: var(--font-body);
+    transition: border-color var(--transition-fast);
+}
+
+.search-box input:focus {
+    outline: none;
+    border-color: var(--accent-secondary);
+}
+
+.search-box input::placeholder {
+    color: var(--text-muted);
+}
+
+.search-icon {
+    position: absolute;
+    left: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--text-muted);
+    pointer-events: none;
+}
+
+.sort-box {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.sort-box label {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.sort-box select {
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.sort-box select:focus {
+    outline: none;
+    border-color: var(--accent-secondary);
+}
+
+/* ========================================
+   Active Filters Display
+   ======================================== */
+
+.active-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-lg);
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border-light);
+}
+
+.active-filters.hidden {
+    display: none;
+}
+
+.filter-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--accent-primary);
+    border-radius: var(--radius-sm);
+    font-size: 0.8rem;
+}
+
+.filter-tag .remove {
+    cursor: pointer;
+    opacity: 0.7;
+    transition: opacity var(--transition-fast);
+}
+
+.filter-tag .remove:hover {
+    opacity: 1;
+}
+
+/* ========================================
+   Main Content
+   ======================================== */
+
+.main-content {
+    flex: 1;
+    display: flex;
+    overflow: hidden;
+}
+
+/* ========================================
+   Perfume List
+   ======================================== */
+
+.perfume-list-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.list-header {
+    display: grid;
+    grid-template-columns: 1fr 2fr 80px 120px;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-lg);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.perfume-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-sm) 0;
+}
+
+.perfume-item {
+    display: grid;
+    grid-template-columns: 1fr 2fr 80px 120px;
+    gap: var(--space-sm);
+    padding: var(--space-sm) var(--space-lg);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+    border-bottom: 1px solid var(--border-light);
+}
+
+.perfume-item:hover {
+    background: var(--bg-hover);
+}
+
+.perfume-item.selected {
+    background: var(--bg-selected);
+}
+
+.perfume-item .brand {
+    font-weight: 500;
+    color: var(--text-accent);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.perfume-item .name {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.perfume-item .concentration {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.perfume-item .locations {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.list-footer {
+    padding: var(--space-sm) var(--space-lg);
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-color);
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.loading {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: var(--space-xl);
+    color: var(--text-muted);
+}
+
+.no-results {
+    text-align: center;
+    padding: var(--space-xl);
+    color: var(--text-muted);
+}
+
+/* ========================================
+   Detail Panel
+   ======================================== */
+
+.detail-panel {
+    width: 400px;
+    background: var(--bg-secondary);
+    border-left: 1px solid var(--border-color);
+    overflow-y: auto;
+    padding: var(--space-lg);
+    position: relative;
+}
+
+.detail-panel.hidden {
+    display: none;
+}
+
+.detail-panel .btn-close {
+    position: absolute;
+    top: var(--space-md);
+    right: var(--space-md);
+}
+
+.detail-header {
+    margin-bottom: var(--space-lg);
+    padding-bottom: var(--space-md);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.detail-brand {
+    font-family: var(--font-display);
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-accent);
+    margin-bottom: var(--space-xs);
+}
+
+.detail-name-conc {
+    font-size: 1.1rem;
+    font-weight: 400;
+    color: var(--text-primary);
+    margin-bottom: var(--space-xs);
+}
+
+.detail-state {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+/* ========================================
+   Detail Sections
+   ======================================== */
+
+.detail-section {
+    margin-bottom: var(--space-lg);
+}
+
+.detail-section.hidden {
+    display: none;
+}
+
+.section-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-sm);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Notes */
+.notes-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.note-item {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+}
+
+.note-title {
+    font-weight: 500;
+    color: var(--text-accent);
+    margin-bottom: var(--space-xs);
+}
+
+.note-text {
+    color: var(--text-primary);
+    white-space: pre-wrap;
+    line-height: 1.7;
+}
+
+/* Fragrantica */
+.fragrantica-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-sm);
+}
+
+.fragrantica-header .section-title {
+    margin-bottom: 0;
+}
+
+.fragrantica-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.vote-block {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.vote-block-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-sm) var(--space-md);
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.vote-block-header:hover {
+    background: var(--bg-hover);
+}
+
+.vote-block-title {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.vote-block-toggle {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+.vote-block-content {
+    padding: 0 var(--space-md) var(--space-md);
+    display: none;
+}
+
+.vote-block.expanded .vote-block-content {
+    display: block;
+}
+
+.vote-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-xs) 0;
+    font-size: 0.9rem;
+}
+
+.vote-label {
+    color: var(--text-secondary);
+}
+
+.vote-values {
+    display: flex;
+    gap: var(--space-md);
+}
+
+.vote-fragrantica {
+    color: var(--text-muted);
+}
+
+.vote-mine {
+    color: var(--accent-success);
+    font-weight: 500;
+}
+
+/* Events */
+.events-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.event-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    padding: var(--space-sm);
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+}
+
+.event-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.event-type {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.event-details {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.event-date {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* Links */
+.links-content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.link-item {
+    display: block;
+    padding: var(--space-sm);
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    color: var(--accent-secondary);
+    text-decoration: none;
+    transition: background var(--transition-fast);
+    word-break: break-all;
+}
+
+.link-item:hover {
+    background: var(--bg-hover);
+}
+
+/* Tags */
+.tags-content {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+}
+
+.tag-item {
+    padding: var(--space-xs) var(--space-sm);
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+/* ========================================
+   Modal
+   ======================================== */
+
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+}
+
+.modal-content {
+    position: relative;
+    width: 90%;
+    max-width: 500px;
+    max-height: 80vh;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-lg);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: var(--space-md) var(--space-lg);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    font-size: 1.1rem;
+    font-weight: 500;
+}
+
+.modal-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space-lg);
+}
+
+.modal-footer {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    padding: var(--space-md) var(--space-lg);
+    border-top: 1px solid var(--border-color);
+}
+
+/* Filter Groups */
+.filter-group {
+    margin-bottom: var(--space-lg);
+}
+
+.filter-group:last-child {
+    margin-bottom: 0;
+}
+
+.filter-group label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-sm);
+}
+
+.filter-group select {
+    width: 100%;
+    min-height: 120px;
+    padding: var(--space-sm);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.9rem;
+}
+
+.filter-group select option {
+    padding: var(--space-xs);
+}
+
+.filter-group select option:checked {
+    background: var(--accent-primary);
+}
+
+/* ========================================
+   Scrollbar
+   ======================================== */
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: var(--bg-tertiary);
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* ========================================
+   Responsive Design
+   ======================================== */
+
+@media (max-width: 768px) {
+    .header {
+        padding: var(--space-sm) var(--space-md);
+    }
+    
+    .logo {
+        font-size: 1.4rem;
+    }
+    
+    .toolbar {
+        padding: var(--space-sm) var(--space-md);
+    }
+    
+    .sort-box label {
+        display: none;
+    }
+    
+    .list-header {
+        display: none;
+    }
+    
+    .perfume-item {
+        display: flex;
+        flex-direction: column;
+        gap: var(--space-xs);
+        padding: var(--space-md);
+    }
+    
+    .perfume-item .brand {
+        font-size: 0.85rem;
+    }
+    
+    .perfume-item .name {
+        font-size: 1rem;
+        font-weight: 500;
+    }
+    
+    .perfume-item .concentration,
+    .perfume-item .locations {
+        font-size: 0.8rem;
+    }
+    
+    /* Detail panel becomes full screen on mobile */
+    .detail-panel {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        z-index: 200;
+        border-left: none;
+    }
+    
+    .active-filters {
+        padding: var(--space-sm) var(--space-md);
+    }
+}
+
+@media (max-width: 480px) {
+    .btn .label {
+        display: none;
+    }
+    
+    .search-box {
+        min-width: 150px;
+    }
+}
