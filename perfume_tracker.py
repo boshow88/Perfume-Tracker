@@ -251,6 +251,144 @@ FONT_SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24]
 
 
 # -----------------------------
+# Tooltip Helper
+# -----------------------------
+class ToolTip:
+    """A simple tooltip that appears on hover."""
+    def __init__(self, widget, delay=500):
+        self.widget = widget
+        self.delay = delay  # ms before showing
+        self.tip_window = None
+        self.after_id = None
+        self.text = ""
+        
+    def show(self, text, x=None, y=None):
+        """Show tooltip with given text at position."""
+        if not text or text == self.text and self.tip_window:
+            return
+        self.text = text
+        self.hide()
+        
+        if x is None:
+            x = self.widget.winfo_rootx() + 20
+        if y is None:
+            y = self.widget.winfo_rooty() + self.widget.winfo_height() + 5
+        
+        self.tip_window = tw = tk.Toplevel(self.widget)
+        tw.wm_overrideredirect(True)
+        tw.wm_geometry(f"+{x}+{y}")
+        
+        label = tk.Label(tw, text=text, justify="left",
+                        background=COLORS["panel"], foreground=COLORS["text"],
+                        relief="solid", borderwidth=1,
+                        font=("Segoe UI", 9), padx=6, pady=3,
+                        wraplength=400)
+        label.pack()
+        
+    def hide(self):
+        """Hide the tooltip."""
+        if self.tip_window:
+            self.tip_window.destroy()
+            self.tip_window = None
+        self.text = ""
+        
+    def schedule(self, text, x=None, y=None):
+        """Schedule tooltip to show after delay."""
+        self.cancel()
+        self.after_id = self.widget.after(self.delay, lambda: self.show(text, x, y))
+        
+    def cancel(self):
+        """Cancel scheduled tooltip."""
+        if self.after_id:
+            self.widget.after_cancel(self.after_id)
+            self.after_id = None
+
+
+class TreeviewTooltip:
+    """Tooltip for Treeview that shows full cell content on hover."""
+    def __init__(self, tree, delay=600):
+        self.tree = tree
+        self.tooltip = ToolTip(tree, delay)
+        self.current_cell = (None, None)  # (row, column)
+        
+        tree.bind("<Motion>", self._on_motion)
+        tree.bind("<Leave>", self._on_leave)
+        
+    def _on_motion(self, event):
+        """Handle mouse motion over treeview."""
+        # Only show tooltip in "cell" region (not header, separator, etc.)
+        region = self.tree.identify_region(event.x, event.y)
+        if region != "cell":
+            self.tooltip.cancel()
+            self.tooltip.hide()
+            self.current_cell = (None, None)
+            return
+        
+        # Identify the cell under cursor
+        row_id = self.tree.identify_row(event.y)
+        column = self.tree.identify_column(event.x)
+        
+        if not row_id or not column:
+            self.tooltip.cancel()
+            self.tooltip.hide()
+            self.current_cell = (None, None)
+            return
+            
+        # Check if we're in the same cell
+        if (row_id, column) == self.current_cell:
+            return
+            
+        self.current_cell = (row_id, column)
+        self.tooltip.cancel()
+        self.tooltip.hide()
+        
+        # Get column index (column is like "#1", "#2", etc.)
+        try:
+            col_idx = int(column.replace("#", "")) - 1
+            values = self.tree.item(row_id, "values")
+            if col_idx < len(values):
+                cell_text = str(values[col_idx])
+                if cell_text:
+                    # Show tooltip near cursor
+                    x = self.tree.winfo_rootx() + event.x + 15
+                    y = self.tree.winfo_rooty() + event.y + 20
+                    self.tooltip.schedule(cell_text, x, y)
+        except (ValueError, IndexError):
+            pass
+            
+    def _on_leave(self, event):
+        """Handle mouse leaving treeview."""
+        self.tooltip.cancel()
+        self.tooltip.hide()
+        self.current_cell = (None, None)
+
+
+class LabelTooltip:
+    """Tooltip for Label widgets that shows full text on hover."""
+    def __init__(self, label, delay=600):
+        self.label = label
+        self.tooltip = ToolTip(label, delay)
+        self._text = ""
+        
+        label.bind("<Enter>", self._on_enter)
+        label.bind("<Leave>", self._on_leave)
+        
+    def set_text(self, text):
+        """Set the tooltip text (call this when updating the label)."""
+        self._text = text
+        
+    def _on_enter(self, event):
+        """Show tooltip on hover."""
+        if self._text:
+            self.tooltip.schedule(self._text)
+            
+    def _on_leave(self, event):
+        """Hide tooltip on leave."""
+        self.tooltip.cancel()
+        self.tooltip.hide()
+
+
+# -----------------------------
 # Persistence
 # -----------------------------
 def ensure_dirs():
@@ -3391,6 +3529,10 @@ class App(tk.Tk):
         self.style.configure("Treeview", background=COLORS["panel"], fieldbackground=COLORS["panel"], foreground=COLORS["text"])
         self.style.configure("Treeview.Heading", background=COLORS["bg"], foreground=COLORS["text"])
         self.style.map("Treeview", background=[("selected", "#2B3A55")])
+        # Heading hover: slightly lighter background, keep text visible
+        self.style.map("Treeview.Heading", 
+                      background=[("active", "#3A4A5A")],
+                      foreground=[("active", COLORS["text"])])
 
         self._apply_font_size()
 
@@ -3523,6 +3665,9 @@ class App(tk.Tk):
         
         # Right-click on header for column visibility
         self.tree.bind("<Button-3>", self._on_tree_right_click)
+        
+        # Tooltip for treeview cells
+        self.tree_tooltip = TreeviewTooltip(self.tree)
 
         # Update button states
         self._update_button_states()
@@ -3565,10 +3710,12 @@ class App(tk.Tk):
         # Brand (line 1)
         self.detail_title = ttk.Label(right, text="(no selection)", style="Panel.TLabel", font=self.font_title)
         self.detail_title.pack(fill="x", padx=10, pady=(0, 0), anchor="w")
+        self.detail_title_tooltip = LabelTooltip(self.detail_title)
         
         # Name · Concentration (line 2)
         self.name_conc_label = ttk.Label(right, text="", style="Panel.TLabel", font=self.font_section)
         self.name_conc_label.pack(fill="x", padx=10, pady=(0, 2), anchor="w")
+        self.name_conc_tooltip = LabelTooltip(self.name_conc_label)
         
         # State (line 3)
         self.state_label = ttk.Label(right, text="", style="Muted.TLabel")
@@ -4164,7 +4311,9 @@ class App(tk.Tk):
         brand_display = self.get_brand_name(p.brand_id)
         
         # Line 1: Brand
-        self.detail_title.config(text=brand_display if brand_display else "(no brand)")
+        brand_text = brand_display if brand_display else "(no brand)"
+        self.detail_title.config(text=brand_text)
+        self.detail_title_tooltip.set_text(brand_text)
         
         # Line 2: Name · Concentration
         conc_name = self.get_concentration_name(p.concentration_id)
@@ -4173,6 +4322,7 @@ class App(tk.Tk):
         else:
             name_conc_text = p.name
         self.name_conc_label.config(text=name_conc_text)
+        self.name_conc_tooltip.set_text(name_conc_text)
         
         # Line 3: State (derived from events)
         tag_names_for_state = [self.get_tag_name(tid) for tid in p.tag_ids]
@@ -4206,12 +4356,15 @@ class App(tk.Tk):
             for link in links:
                 url = link.get("url", "")
                 label = link.get("label") or get_label_from_url(url)
-                # Create clickable link
+                # Create clickable link with tooltip showing full URL
                 link_label = tk.Label(self.links_display_frame, text=label, 
                                      fg=COLORS["accent"], bg=COLORS["panel"],
                                      cursor="hand2", anchor="w")
                 link_label.pack(anchor="w", pady=1)
                 link_label.bind("<Button-1>", lambda e, u=url: self._open_url(u))
+                # Add tooltip for full URL
+                link_tooltip = LabelTooltip(link_label)
+                link_tooltip.set_text(url)
 
         # notes
         for widget in self.notes_display_frame.winfo_children():
