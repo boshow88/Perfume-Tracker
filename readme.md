@@ -133,7 +133,7 @@ Centralized management of 5 data types; rename once, update everywhere:
 |-----|-------------|----------|
 | Brands | Brand names | Dior, Chanel, Tom Ford |
 | Locations | Testing locations (with region) | Sephora (NYC), Nordstrom (LA) |
-| Concentrations | Concentration types | Extrait, Parfum, EdP, EdT, EdC, EF |
+| Concentrations | Concentration types | Abs., Extrait, Parfum, EdP, EdT, EdC, EF |
 | Tags | Tags | woody, fresh, office, summer |
 | Purchase Types | Purchase types | Full Bottle, Decant, Gift |
 
