@@ -2,6 +2,3 @@
 __pycache__/
 *.py[cod]
 *$py.class
-
-# Data - not tracked in git
-data/
