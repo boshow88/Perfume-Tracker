@@ -199,6 +199,12 @@ Date and Location persist when switching perfumes for batch logging.
 
 **Fragrantica URL**: You can save the Fragrantica page URL. If set, the "Fragrantica ↗" title in the right panel becomes clickable.
 
+**Import Text**: Click "Import Text" button to quickly import vote data from Fragrantica:
+1. Open the perfume page on Fragrantica
+2. Select all (Ctrl+A) and copy (Ctrl+C)
+3. Paste into the import dialog and click "Parse & Fill"
+4. The parser extracts vote counts from all 6 dimensions automatically
+
 **6 Rating Dimensions**:
 1. **Rating** - love / like / ok / dislike / hate
 2. **Longevity** - eternal / long / moderate / weak / poor (best on top)
