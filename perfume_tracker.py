@@ -23,6 +23,9 @@ from dataclasses import dataclass, asdict, field
 from typing import Dict, List, Optional, Tuple
 
 import tkinter as tk
+
+# Local modules
+from fragrantica_parser import parse_fragrantica_text
 from tkinter import ttk, messagebox, simpledialog, font as tkfont
 
 
@@ -5611,6 +5614,7 @@ class App(tk.Tk):
         win.configure(bg=COLORS["bg"])
         win.geometry("550x500")
         win.resizable(True, True)
+        win.transient(self)  # Keep on top of main window
 
         main_frame = ttk.Frame(win, style="TFrame")
         main_frame.pack(fill="both", expand=True, padx=12, pady=12)
@@ -5626,7 +5630,12 @@ class App(tk.Tk):
         url_entry = ttk.Entry(url_frame, textvariable=var_url, width=45)
         url_entry.pack(side="left", padx=(8, 0), fill="x", expand=True)
         
-        ttk.Label(main_frame, text="Enter raw vote counts from Fragrantica:", style="Muted.TLabel").pack(anchor="w", pady=(0, 10))
+        # Import button row
+        import_row = ttk.Frame(main_frame, style="TFrame")
+        import_row.pack(fill="x", pady=(0, 10))
+        ttk.Label(import_row, text="Enter raw vote counts from Fragrantica:", style="Muted.TLabel").pack(side="left")
+        ttk.Button(import_row, text="Import Text", 
+                   command=lambda: self._import_fragrantica_text(entry_map, var_url, win)).pack(side="left", padx=(12, 0))
 
         # Create a scrollable frame for all vote blocks
         canvas_frame = ttk.Frame(main_frame, style="TFrame")
@@ -5690,6 +5699,75 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Clear All", command=lambda: self._clear_fragrantica_inputs(entry_map)).pack(side="left")
         ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side="right", padx=(8, 0))
         ttk.Button(btn_frame, text="Save", command=lambda: self._save_fragrantica(p, entry_map, var_url.get(), win)).pack(side="right")
+
+    def _import_fragrantica_text(self, entry_map: Dict[str, Dict[str, tk.StringVar]], var_url: tk.StringVar, parent_win: tk.Toplevel):
+        """Open dialog to paste Fragrantica page text and parse vote data"""
+        import_win = tk.Toplevel(parent_win)
+        import_win.title("Import Fragrantica Text")
+        import_win.configure(bg=COLORS["bg"])
+        import_win.transient(parent_win)
+        import_win.grab_set()
+        
+        main_frame = ttk.Frame(import_win, style="TFrame")
+        main_frame.pack(fill="both", expand=True, padx=12, pady=12)
+        
+        # Instructions
+        ttk.Label(main_frame, text="Paste Fragrantica page text content (Ctrl+A, Ctrl+C):", 
+                  style="TLabel").pack(anchor="w", pady=(0, 8))
+        
+        # Text area with scrollbar - set explicit height in lines
+        text_frame = ttk.Frame(main_frame, style="TFrame")
+        text_frame.pack(fill="both", expand=True)
+        
+        text_widget = tk.Text(text_frame, wrap="word", bg=COLORS["panel"], 
+                              fg=COLORS["text"], insertbackground=COLORS["text"],
+                              font=self.font_normal, width=70, height=20)
+        scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+        
+        text_widget.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
+        
+        # Status label for warnings
+        status_var = tk.StringVar(value="")
+        status_label = ttk.Label(main_frame, textvariable=status_var, style="Muted.TLabel", 
+                                 wraplength=560)
+        status_label.pack(anchor="w", pady=(8, 0))
+        
+        def do_parse():
+            raw_text = text_widget.get("1.0", "end-1c")
+            if not raw_text.strip():
+                messagebox.showwarning("Empty", "Please paste text content first")
+                return
+            
+            # Parse the text
+            parsed_data, warnings = parse_fragrantica_text(raw_text)
+            
+            # Fill the entry fields
+            filled_count = 0
+            for block_name, votes in parsed_data.items():
+                if block_name in entry_map:
+                    for key, value in votes.items():
+                        if key in entry_map[block_name]:
+                            entry_map[block_name][key].set(str(value))
+                            filled_count += 1
+            
+            # Show result
+            if warnings:
+                status_var.set(f"Filled {filled_count} fields. Warnings: " + "; ".join(warnings))
+            else:
+                import_win.destroy()
+                # transient parent will automatically stay on top
+        
+        # Buttons
+        btn_frame = ttk.Frame(main_frame, style="TFrame")
+        btn_frame.pack(fill="x", pady=(12, 0))
+        
+        ttk.Button(btn_frame, text="Cancel", command=import_win.destroy).pack(side="right", padx=(8, 0))
+        ttk.Button(btn_frame, text="Parse & Fill", command=do_parse).pack(side="right")
+        
+        # Focus on text area
+        text_widget.focus_set()
 
     def _clear_fragrantica_inputs(self, entry_map: Dict[str, Dict[str, tk.StringVar]]):
         """Clear all Fragrantica input fields"""
