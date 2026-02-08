@@ -3782,6 +3782,7 @@ class App(tk.Tk):
         )
         self.fragrantica_title.pack(side="left")
         self.fragrantica_url = ""  # Store current URL
+        self.fragrantica_title_tooltip = LabelTooltip(self.fragrantica_title)
         
         # Smart expand/collapse toggle button (styled like a button)
         self.toggle_all_btn = tk.Label(
@@ -4444,6 +4445,7 @@ class App(tk.Tk):
                 fg=COLORS["accent"]
             )
             self.fragrantica_title.bind("<Button-1>", lambda e: self._open_url(self.fragrantica_url))
+            self.fragrantica_title_tooltip.set_text(self.fragrantica_url)
         else:
             self.fragrantica_title.config(
                 text="Fragrantica", 
@@ -4451,6 +4453,7 @@ class App(tk.Tk):
                 fg=COLORS["accent"]
             )
             self.fragrantica_title.unbind("<Button-1>")
+            self.fragrantica_title_tooltip.set_text("")
 
         for block_name, keys, _title in VOTE_BLOCKS:
             self.vote_blocks[block_name].set_data(
