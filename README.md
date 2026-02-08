@@ -197,7 +197,7 @@ Date and Location persist when switching perfumes for batch logging.
 
 ### 6. Fragrantica Voting
 
-**Fragrantica URL**: You can save the Fragrantica page URL. If set, the "Fragrantica ↗" title in the right panel becomes clickable.
+**Fragrantica URL**: You can save the Fragrantica page URL (must be from fragrantica.com). If set, the "Fragrantica ↗" title in the right panel becomes clickable and shows the URL on hover.
 
 **Import Text**: Click "Import Text" button to quickly import vote data from Fragrantica:
 1. Open the perfume page on Fragrantica
@@ -209,7 +209,7 @@ Date and Location persist when switching perfumes for batch logging.
 1. **Rating** - love / like / ok / dislike / hate
 2. **Longevity** - eternal / long / moderate / weak / poor (best on top)
 3. **Sillage** - enormous / strong / moderate / intimate (best on top)
-4. **Gender** - male / more_male / unisex / more_female / female (best on top)
+4. **Gender** - male / more_male / unisex / more_female / female
 5. **Value** - excellent / good / fair / expensive / overpriced (best on top)
 6. **When to Wear** - spring / summer / fall / winter / day / night
 

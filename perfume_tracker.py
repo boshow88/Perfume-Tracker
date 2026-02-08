@@ -5800,9 +5800,19 @@ class App(tk.Tk):
             
             p.fragrantica[block_name] = block_data
         
-        # Save URL
+        # Save URL (validate Fragrantica domain)
         url = url.strip()
         if url:
+            # Must be a proper URL starting with http(s) and from fragrantica.com
+            if "\n" in url or "\r" in url:
+                messagebox.showwarning("Invalid URL", "URL cannot contain line breaks", parent=win)
+                return
+            if not (url.startswith("http://") or url.startswith("https://")):
+                messagebox.showwarning("Invalid URL", "URL must start with http:// or https://", parent=win)
+                return
+            if "fragrantica.com" not in url.lower():
+                messagebox.showwarning("Invalid URL", "URL must be from fragrantica.com", parent=win)
+                return
             p.fragrantica["url"] = url
         elif "url" in p.fragrantica:
             del p.fragrantica["url"]
