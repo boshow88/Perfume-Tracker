@@ -1917,6 +1917,7 @@ class ManageDataDialog(tk.Toplevel):
         self.configure(bg=COLORS["bg"])
         self.geometry("650x550")
         self.resizable(True, True)
+        self.transient(parent)
         
         self.app = app
         self.current_tab = "brands"
