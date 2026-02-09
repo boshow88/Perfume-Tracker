@@ -3553,6 +3553,7 @@ class App(tk.Tk):
         self.style.configure("TButton", padding=6)
         self.style.configure("TEntry", fieldbackground=COLORS["panel"], foreground=COLORS["text"], insertcolor="#888888")
         self.style.configure("TCombobox", fieldbackground=COLORS["panel"], foreground=COLORS["text"], insertcolor="#888888")
+        self.style.map("TCombobox", fieldbackground=[("readonly", COLORS["panel"])], foreground=[("readonly", COLORS["text"])])
         self.style.configure("Treeview", background=COLORS["panel"], fieldbackground=COLORS["panel"], foreground=COLORS["text"])
         self.style.configure("Treeview.Heading", background=COLORS["bg"], foreground=COLORS["text"])
         self.style.map("Treeview", background=[("selected", "#2B3A55")])
