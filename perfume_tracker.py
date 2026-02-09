@@ -1319,24 +1319,11 @@ class SortDialog(tk.Toplevel):
                  font=self.app.font_section).pack(anchor="w", padx=8, pady=(8, 4))
         
         # Display current active sorts using Text widget (like Filter)
-        active_text_frame = tk.Text(active_section, height=6, bg=COLORS["panel"], fg=COLORS["text"],
+        self.active_text_frame = tk.Text(active_section, height=6, bg=COLORS["panel"], fg=COLORS["text"],
                                     highlightthickness=1, highlightbackground=COLORS["accent"],
                                     wrap="word", padx=8, pady=4)
-        active_text_frame.pack(fill="x", padx=8, pady=(0, 8))
-        
-        # Build text content
-        if self.current_config.dimensions:
-            lines = []
-            for idx, (dim, order) in enumerate(self.current_config.dimensions):
-                dim_label = next(lbl for d, lbl in self.DIMENSIONS if d == dim)
-                orders = self._get_orders_for_dimension(dim)
-                order_display = orders.get(order, list(orders.values())[0])
-                lines.append(f"{idx+1}. {dim_label} ({order_display})")
-            active_text_frame.insert("1.0", "\n".join(lines))
-        else:
-            active_text_frame.insert("1.0", "(No active sorts)")
-        
-        active_text_frame.config(state="disabled")  # Read-only
+        self.active_text_frame.pack(fill="x", padx=8, pady=(0, 8))
+        self._update_active_text()
         
         # Clear button
         ttk.Button(active_section, text="Clear Active", command=self._clear_all).pack(pady=(0, 8))
@@ -1404,6 +1391,22 @@ class SortDialog(tk.Toplevel):
         main.columnconfigure(1, weight=2)
         main.rowconfigure(2, weight=1)  # Row with Available and Active sorts
     
+    def _update_active_text(self):
+        """Update the active sorts text display"""
+        self.active_text_frame.config(state="normal")
+        self.active_text_frame.delete("1.0", "end")
+        if self.active_dimensions:
+            lines = []
+            for idx, (dim, order) in enumerate(self.active_dimensions):
+                dim_label = next(lbl for d, lbl in self.DIMENSIONS if d == dim)
+                orders = self._get_orders_for_dimension(dim)
+                order_display = orders.get(order, list(orders.values())[0])
+                lines.append(f"{idx+1}. {dim_label} ({order_display})")
+            self.active_text_frame.insert("1.0", "\n".join(lines))
+        else:
+            self.active_text_frame.insert("1.0", "(No active sorts)")
+        self.active_text_frame.config(state="disabled")
+    
     def _refresh(self):
         # Update available list
         self.available_list.delete(0, "end")
@@ -1418,6 +1421,9 @@ class SortDialog(tk.Toplevel):
         
         for idx, (dim, order) in enumerate(self.active_dimensions):
             self._create_active_item(idx, dim, order)
+        
+        # Update active text display
+        self._update_active_text()
     
     def _create_active_item(self, idx: int, dim: str, order: str):
         frame = ttk.Frame(self.active_frame, style="Panel.TFrame")
@@ -2425,14 +2431,11 @@ class FilterDialog(tk.Toplevel):
                  font=self.app.font_section).pack(anchor="w", padx=8, pady=(8, 4))
         
         # Display current active filters
-        active_text_frame = tk.Text(active_section, height=6, bg=COLORS["panel"], fg=COLORS["text"],
+        self.active_text_frame = tk.Text(active_section, height=6, bg=COLORS["panel"], fg=COLORS["text"],
                                     highlightthickness=1, highlightbackground=COLORS["accent"],
                                     wrap="word", padx=8, pady=4)
-        active_text_frame.pack(fill="x", padx=8, pady=(0, 8))
-        
-        active_filters_text = self._get_active_filters_text()
-        active_text_frame.insert("1.0", active_filters_text if active_filters_text else "(No active filters)")
-        active_text_frame.config(state="disabled")  # Read-only
+        self.active_text_frame.pack(fill="x", padx=8, pady=(0, 8))
+        self._update_active_text()
         
         # Clear button
         ttk.Button(active_section, text="Clear Active", command=self._clear_all).pack(pady=(0, 8))
@@ -3065,6 +3068,9 @@ class FilterDialog(tk.Toplevel):
         config = self._build_config()
         count = self._count_matches(config)
         self.result_label.config(text=f"Result: {count} / {len(self.perfumes)} perfumes match")
+        # Also update active text if available
+        if hasattr(self, 'active_text_frame'):
+            self._update_active_text()
     
     def _build_config(self) -> FilterConfig:
         """Build filter config from current UI state"""
@@ -3257,6 +3263,18 @@ class FilterDialog(tk.Toplevel):
         self.var_has_my_vote.set(False)
         self.var_has_fragrantica.set(False)
         self._update_result_count()
+        self._update_active_text()
+    
+    def _update_active_text(self):
+        """Update the active filters text display"""
+        self.active_text_frame.config(state="normal")
+        self.active_text_frame.delete("1.0", "end")
+        # Build current config from UI state
+        temp_config = self._build_config()
+        self.current_config = temp_config  # Update for text generation
+        active_filters_text = self._get_active_filters_text()
+        self.active_text_frame.insert("1.0", active_filters_text if active_filters_text else "(No active filters)")
+        self.active_text_frame.config(state="disabled")
     
     def _apply(self):
         """Apply and close"""
@@ -3533,6 +3551,8 @@ class App(tk.Tk):
         self.style.configure("Panel.TLabel", background=COLORS["panel"], foreground=COLORS["text"])
         self.style.configure("Muted.TLabel", background=COLORS["bg"], foreground=COLORS["muted"])
         self.style.configure("TButton", padding=6)
+        self.style.configure("TEntry", fieldbackground=COLORS["panel"], foreground=COLORS["text"], insertcolor="#888888")
+        self.style.configure("TCombobox", fieldbackground=COLORS["panel"], foreground=COLORS["text"], insertcolor="#888888")
         self.style.configure("Treeview", background=COLORS["panel"], fieldbackground=COLORS["panel"], foreground=COLORS["text"])
         self.style.configure("Treeview.Heading", background=COLORS["bg"], foreground=COLORS["text"])
         self.style.map("Treeview", background=[("selected", "#2B3A55")])
@@ -4487,7 +4507,7 @@ class App(tk.Tk):
         
         text_widget = tk.Text(text_frame, wrap="word", 
                              bg=COLORS["panel"], fg=COLORS["text"],
-                             font=self.font_normal,
+                             font=self.font_normal, insertbackground="#888888",
                              relief="flat", padx=5, pady=5)
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
         text_widget.configure(yscrollcommand=scrollbar.set)
@@ -5418,7 +5438,8 @@ class App(tk.Tk):
         
         content_text = tk.Text(content_frame, wrap="word", 
                               font=self.font_normal,
-                              bg=COLORS["bg"], fg=COLORS["text"])
+                              bg=COLORS["bg"], fg=COLORS["text"],
+                              insertbackground="#888888")
         content_scrollbar = ttk.Scrollbar(content_frame, orient="vertical", command=content_text.yview)
         content_text.configure(yscrollcommand=content_scrollbar.set)
         
@@ -5596,7 +5617,11 @@ class App(tk.Tk):
         else:
             p.my_votes[my_block_key] = block
 
+        # Save scroll position before refresh
+        scroll_pos = self.detail_canvas.yview()[0]
         self._on_select()
+        # Restore scroll position after refresh
+        self.detail_canvas.yview_moveto(scroll_pos)
         self.save()
 
     def ui_edit_fragrantica(self):
@@ -5724,7 +5749,7 @@ class App(tk.Tk):
         text_frame.pack(fill="both", expand=True)
         
         text_widget = tk.Text(text_frame, wrap="word", bg=COLORS["panel"], 
-                              fg=COLORS["text"], insertbackground=COLORS["text"],
+                              fg=COLORS["text"], insertbackground="#888888",
                               font=self.font_normal, width=70, height=20)
         scrollbar = ttk.Scrollbar(text_frame, orient="vertical", command=text_widget.yview)
         text_widget.configure(yscrollcommand=scrollbar.set)
