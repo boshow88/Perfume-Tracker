@@ -104,7 +104,7 @@ python perfume_tracker.py
 ### Right Panel Detail
 - **Brand**: Displayed as title (first line), hover for full text
 - **Name · Concentration**: Displayed as subtitle (e.g., "Sauvage · EdP"), hover for full text
-- **State**: Displayed as gray text (e.g., "Owned", "Tested")
+- **State**: Displayed as gray text (e.g., "Owned", "Smelled")
 - **Tags**: Displayed as gray text, click to expand popup with full tag list
 - **Links**: Click to open, hover for full URL
 
@@ -157,7 +157,7 @@ Centralized management of 5 data types; rename once, update everywhere:
 | Brand | Dropdown + list display, select from existing items only |
 | Concentration | Dropdown + list display, select from existing items only |
 | Location | Dropdown + list display, match any selected location |
-| State | Owned / Tested / Wishlist multi-select |
+| State | Owned / Smelled / Wishlist multi-select |
 | Season/Time | Spring/Summer/Fall/Winter/Day/Night multi-select |
 | Score | Dual-slider range (min~max), min gap 0.3, Include/Exclude modes |
 | Gender | Multi-select gender preference |
@@ -181,7 +181,7 @@ Centralized management of 5 data types; rename once, update everywhere:
 | Sillage | High→Low / Low→High |
 | Gender | Female First / Male First / Unisex First |
 | Price Value | High→Low / Low→High |
-| State | Owned First / Tested First |
+| State | Owned First / Smelled First |
 
 Supports multi-level sorting (e.g., Gender first, then Rating, then Name)
 
@@ -287,6 +287,7 @@ class Event:
     location: str              # Location name
     ml_delta: float            # Volume change (optional)
     price: float               # Price (optional)
+    purchase_type: str         # Display name (synced from purchase_types_map)
     purchase_type_id: str      # → purchase_types_map
     note: str                  # Note
 ```

@@ -244,11 +244,13 @@ class AppData:
     })
     # UI preferences
     font_size: int = 10
+    # Format names that count toward "Owned ml" (default: full only)
+    owned_ml_include_formats: List[str] = field(default_factory=lambda: ["full"])
 
 
 # Default values for new data types
 DEFAULT_CONCENTRATIONS = ["Abs.", "Extrait", "Parfum", "EdP", "EdT", "EdC", "EF"]
-DEFAULT_PURCHASE_TYPES = ["full", "decant", "gift"]
+DEFAULT_PURCHASE_TYPES = ["full", "decant"]
 
 # Available font sizes (discrete steps)
 FONT_SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24]
@@ -499,6 +501,7 @@ def load_app_data() -> AppData:
     
     # Load font size preference
     app_data.font_size = raw.get("font_size", 10)
+    app_data.owned_ml_include_formats = raw.get("owned_ml_include_formats", ["full"])
     
     # Load outlets_map (needs special handling for OutletInfo)
     for oid, oinfo in raw.get("outlets_map", {}).items():
@@ -606,6 +609,7 @@ def save_app_data(app_data: AppData):
         "note_titles_map": app_data.note_titles_map,
         "sort_modes": app_data.sort_modes,
         "font_size": app_data.font_size,
+        "owned_ml_include_formats": app_data.owned_ml_include_formats,
     }
     
     with open(DB_PATH, "w", encoding="utf-8") as f:
@@ -615,24 +619,26 @@ def save_app_data(app_data: AppData):
 # -----------------------------
 # Derived state (event-driven)
 # -----------------------------
-def derive_state(p: Perfume, tag_names: List[str] = None) -> Tuple[str, float]:
+def derive_state(p: Perfume, tag_names: List[str] = None, included_purchase_types: Optional[List[str]] = None) -> Tuple[str, float]:
     """
     Returns:
       (state_string, owned_ml)
     Rule of thumb:
       - tested? if any smell/skin exists
       - on_skin? if any skin exists
-      - owned_ml = sum(ml_delta for events that have it)
+      - owned_ml = sum(ml_delta for events whose purchase_type is in included_purchase_types)
       - want_to_buy? if tag has "want" or note includes "want" (prototype heuristic)
     
-    V2: tag_names parameter for ID-based tag lookup
+    included_purchase_types: if provided, only events with this purchase_type name count toward owned_ml.
     """
     tested = any(e.event_type in ("smell", "skin") for e in p.events)
     on_skin = any(e.event_type == "skin" for e in p.events)
     owned_ml = 0.0
+    included = set(included_purchase_types) if included_purchase_types is not None else None
     for e in p.events:
         if e.ml_delta is not None:
-            owned_ml += float(e.ml_delta)
+            if included is None or (e.purchase_type or "").strip() in included:
+                owned_ml += float(e.ml_delta)
 
     # V2: Use tag_names parameter (required for want detection)
     tags_to_check = tag_names if tag_names is not None else []
@@ -640,7 +646,7 @@ def derive_state(p: Perfume, tag_names: List[str] = None) -> Tuple[str, float]:
 
     parts = []
     if tested:
-        parts.append("Tested")
+        parts.append("Smelled")
     if on_skin:
         parts.append("On-skin")
     if owned_ml > 0:
@@ -1474,7 +1480,7 @@ class SortDialog(tk.Toplevel):
         elif dim == "state":
             return {
                 "owned_first": "Owned First",
-                "tested_first": "Tested First",
+                "tested_first": "Smelled First",
             }
         else:
             return {
@@ -1846,7 +1852,9 @@ class EditEventsDialog(tk.Toplevel):
             
             if is_edit:
                 # Update existing event
-                edit_event.purchase_type = var_format.get().strip()
+                name = var_format.get().strip()
+                edit_event.purchase_type = name
+                edit_event.purchase_type_id = self.app.get_purchase_type_id_by_name(name)
                 edit_event.ml_delta = ml if event_type == "buy" else -ml if ml else None
                 edit_event.price = price  # None if blank, 0 if free, or actual price
                 edit_event.note = var_note.get().strip()
@@ -2094,7 +2102,6 @@ class ManageDataDialog(tk.Toplevel):
         elif self.current_tab == "outlets":
             count = sum(1 for p in self.app.perfumes if item_id in p.outlet_ids)
         elif self.current_tab == "purchase_types":
-            # Count events using this purchase type
             count = sum(1 for p in self.app.perfumes for e in p.events if e.purchase_type_id == item_id)
         return count
     
@@ -2252,10 +2259,12 @@ class ManageDataDialog(tk.Toplevel):
                         p.outlet_ids = [target_id if oid == sid else oid for oid in p.outlet_ids]
                         p.outlet_ids = list(dict.fromkeys(p.outlet_ids))
             elif self.current_tab == "purchase_types":
+                target_name = current_map.get(target_id, "")
                 for p in self.app.perfumes:
                     for e in p.events:
                         if e.purchase_type_id == sid:
                             e.purchase_type_id = target_id
+                            e.purchase_type = target_name
             
             del current_map[sid]
         
@@ -2770,7 +2779,7 @@ class FilterDialog(tk.Toplevel):
     
     def _create_states_section(self, parent):
         """Create states checkboxes with flow layout"""
-        states = [("owned", "Owned"), ("tested", "Tested"), ("wishlist", "Wishlist")]
+        states = [("owned", "Owned"), ("tested", "Smelled"), ("wishlist", "Wishlist")]
         
         # Batch buttons (smaller padding)
         btns = ttk.Frame(parent, style="Panel.TFrame")
@@ -3119,11 +3128,11 @@ class FilterDialog(tk.Toplevel):
         # States
         if config.states:
             tag_names = [self.app.get_tag_name(tid) for tid in p.tag_ids] if self.app else []
-            state, owned_ml = derive_state(p, tag_names)
+            state, owned_ml = derive_state(p, tag_names, self.app.app_data.owned_ml_include_formats)
             matches_state = False
             if "owned" in config.states and owned_ml > 0:
                 matches_state = True
-            if "tested" in config.states and "Tested" in state:
+            if "tested" in config.states and "Smelled" in state:
                 matches_state = True
             if "wishlist" in config.states and state == "Wishlist":
                 matches_state = True
@@ -3300,6 +3309,7 @@ class SettingsDialog(tk.Toplevel):
         
         # Store original values for cancel/restore
         self.original_font_size = self.app.font_size
+        self.original_owned_ml_formats = list(self.app.app_data.owned_ml_include_formats)
         
         self._build_ui()
         
@@ -3343,6 +3353,18 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(main, text="(Changes preview immediately, Save to keep)", 
                  style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
         
+        # Owned ml: which formats count
+        ttk.Label(main, text="Formats that count toward Owned ml:", style="TLabel").pack(anchor="w", pady=(16, 6))
+        fmt_frame = ttk.Frame(main, style="TFrame")
+        fmt_frame.pack(fill="x")
+        self.owned_ml_format_vars = {}
+        included = set(self.app.app_data.owned_ml_include_formats)
+        for name in self.app.get_all_purchase_type_names():
+            var = tk.BooleanVar(value=name in included)
+            self.owned_ml_format_vars[name] = var
+            ttk.Checkbutton(fmt_frame, text=name, variable=var, style="TCheckbutton").pack(anchor="w", padx=(0, 16), pady=2)
+        ttk.Label(main, text="(Only checked formats count toward Owned ml)", style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
+        
         # Save / Cancel buttons
         btn_frame = ttk.Frame(main, style="TFrame")
         btn_frame.pack(anchor="e", pady=(20, 0))
@@ -3364,7 +3386,13 @@ class SettingsDialog(tk.Toplevel):
     def _on_save(self):
         """Save settings and close"""
         self.app.app_data.font_size = self.app.font_size
+        self.app.app_data.owned_ml_include_formats = [name for name, var in self.owned_ml_format_vars.items() if var.get()]
+        if not self.app.app_data.owned_ml_include_formats:
+            names = self.app.get_all_purchase_type_names()
+            self.app.app_data.owned_ml_include_formats = [names[0]] if names else ["full"]
         self.app.save()
+        self.app._refresh_list()
+        self.app._on_select()
         self.destroy()
     
     def _on_cancel(self):
@@ -3372,6 +3400,8 @@ class SettingsDialog(tk.Toplevel):
         if self.app.font_size != self.original_font_size:
             self.app.font_size = self.original_font_size
             self.app._apply_font_size()
+        if self.app.app_data.owned_ml_include_formats != self.original_owned_ml_formats:
+            self.app.app_data.owned_ml_include_formats = list(self.original_owned_ml_formats)
         self.destroy()
 
 
@@ -3460,6 +3490,14 @@ class App(tk.Tk):
     def get_purchase_type_name(self, pt_id: str) -> str:
         """Get purchase type name from ID"""
         return self.app_data.purchase_types_map.get(pt_id, "")
+    
+    def get_purchase_type_id_by_name(self, name: str) -> str:
+        """Get purchase type ID by name, return empty string if not found"""
+        name = (name or "").strip()
+        for pt_id, pt_name in self.app_data.purchase_types_map.items():
+            if (pt_name or "").strip() == name:
+                return pt_id
+        return ""
     
     def find_brand_id(self, brand_name: str) -> str:
         """Find brand ID by name, return empty string if not found"""
@@ -3773,10 +3811,8 @@ class App(tk.Tk):
         # Bind mouse wheel for scrolling (only when mouse is over the canvas)
         self.detail_canvas.bind("<Enter>", lambda e: self.detail_canvas.bind_all("<MouseWheel>", self._on_mousewheel))
         self.detail_canvas.bind("<Leave>", lambda e: self.detail_canvas.unbind_all("<MouseWheel>"))
-        
-        # Bind canvas resize to update scrollable frame width
         self.detail_canvas.bind("<Configure>", self._on_canvas_configure)
-
+        
         # Tags section (clickable to expand) - inside scrollable frame
         self.tags_label = tk.Label(
             self.scrollable_detail_frame, 
@@ -3868,7 +3904,6 @@ class App(tk.Tk):
         ttk.Label(self.scrollable_detail_frame, text="Notes", style="Panel.TLabel").pack(anchor="w", padx=(0, 20), pady=(14, 4))
         self.notes_display_frame = ttk.Frame(self.scrollable_detail_frame, style="Panel.TFrame")
         self.notes_display_frame.pack(fill="x", padx=(0, 20))
-
 
         # Context menu on list
         self.menu = tk.Menu(self, tearoff=0)
@@ -4091,7 +4126,7 @@ class App(tk.Tk):
         for p in sorted_perfumes:
             # V2: Pass tag_names to derive_state
             tag_names = [self.get_tag_name(tid) for tid in p.tag_ids]
-            state, _ = derive_state(p, tag_names)
+            state, _ = derive_state(p, tag_names, self.app_data.owned_ml_include_formats)
             brand_display = self.get_brand_name(p.brand_id)
             
             # Get concentration name
@@ -4143,11 +4178,11 @@ class App(tk.Tk):
         if config.states:
             # V2: Pass tag_names to derive_state
             tag_names = [self.get_tag_name(tid) for tid in p.tag_ids]
-            state, owned_ml = derive_state(p, tag_names)
+            state, owned_ml = derive_state(p, tag_names, self.app_data.owned_ml_include_formats)
             matches_state = False
             if "owned" in config.states and owned_ml > 0:
                 matches_state = True
-            if "tested" in config.states and "Tested" in state:
+            if "tested" in config.states and "Smelled" in state:
                 matches_state = True
             if "wishlist" in config.states and state == "Wishlist":
                 matches_state = True
@@ -4318,8 +4353,8 @@ class App(tk.Tk):
         elif dimension == "state":
             # V2: Pass tag_names to derive_state
             tag_names = [self.get_tag_name(tid) for tid in p.tag_ids]
-            state, owned_ml = derive_state(p, tag_names)
-            state_priority = {"Owned": 0, "Tested": 1, "Wishlist": 2}
+            state, owned_ml = derive_state(p, tag_names, self.app_data.owned_ml_include_formats)
+            state_priority = {"Owned": 0, "Smelled": 1, "Wishlist": 2}
             if order == "owned_first":
                 return (state_priority.get(state.split(",")[0], 3),)
             else:  # tested_first
@@ -4355,7 +4390,7 @@ class App(tk.Tk):
         
         # Line 3: State (derived from events)
         tag_names_for_state = [self.get_tag_name(tid) for tid in p.tag_ids]
-        state, _ = derive_state(p, tag_names_for_state)
+        state, _ = derive_state(p, tag_names_for_state, self.app_data.owned_ml_include_formats)
         state_text = state if state else "New"
         self.state_label.config(text=state_text)
         
@@ -4769,6 +4804,8 @@ class App(tk.Tk):
     def _add_event_transaction(self, perfume: "Perfume", event_type: str, 
                                 item_type: str = "", ml: float = 0, price: Optional[float] = None, note: str = "", event_date: str = ""):
         """Add buy/sell type event"""
+        name = item_type.strip()
+        pt_id = self.get_purchase_type_id_by_name(name)
         e = Event(
             id=new_id(),
             perfume_id=perfume.id,
@@ -4776,7 +4813,8 @@ class App(tk.Tk):
             timestamp=now_ts(),
             ml_delta=ml if event_type == "buy" else -ml if ml else None,
             price=price,  # None if not entered, 0 if free, or actual price
-            purchase_type=item_type.strip(),
+            purchase_type=name,
+            purchase_type_id=pt_id,
             note=note.strip(),
             event_date=event_date.strip(),
         )
@@ -5618,11 +5656,7 @@ class App(tk.Tk):
         else:
             p.my_votes[my_block_key] = block
 
-        # Save scroll position before refresh
-        scroll_pos = self.detail_canvas.yview()[0]
         self._on_select()
-        # Restore scroll position after refresh
-        self.detail_canvas.yview_moveto(scroll_pos)
         self.save()
 
     def ui_edit_fragrantica(self):
