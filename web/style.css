@@ -536,11 +536,6 @@ body {
     color: var(--text-primary);
 }
 
-.vote-block-toggle {
-    color: var(--text-muted);
-    font-size: 0.9rem;
-}
-
 .vote-block-content {
     padding: 0 var(--space-md) var(--space-md);
     display: none;
@@ -550,41 +545,98 @@ body {
     display: block;
 }
 
+.vote-block-info {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    flex: 1;
+    justify-content: flex-end;
+    margin-right: var(--space-md);
+}
+
+.block-score {
+    font-weight: 600;
+    color: var(--accent-secondary);
+    font-size: 0.95rem;
+}
+
+.block-sample {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.vote-block-toggle {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    font-family: monospace;
+    width: 16px;
+    text-align: center;
+}
+
 .vote-item {
     display: flex;
-    justify-content: space-between;
     align-items: center;
-    padding: var(--space-xs) var(--space-sm);
-    font-size: 0.9rem;
-    border-radius: var(--radius-sm);
+    padding: var(--space-xs) 0;
+    font-size: 0.85rem;
+    gap: var(--space-sm);
 }
 
 .vote-item.voted {
-    background: rgba(253, 203, 110, 0.15);
+    background: rgba(253, 203, 110, 0.12);
+    border-radius: var(--radius-sm);
+    padding-left: var(--space-xs);
+    padding-right: var(--space-xs);
 }
 
 .vote-label {
     color: var(--text-secondary);
+    min-width: 80px;
+    text-transform: capitalize;
 }
 
-.vote-values {
+.vote-bar-container {
+    flex: 1;
     display: flex;
     align-items: center;
     gap: var(--space-sm);
+    height: 18px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    position: relative;
+}
+
+.vote-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-primary), var(--accent-secondary));
+    border-radius: var(--radius-sm);
+    transition: width 0.3s ease;
+    min-width: 0;
 }
 
 .vote-count {
+    position: absolute;
+    right: var(--space-xs);
+    font-size: 0.75rem;
     color: var(--text-muted);
-}
-
-.vote-pct {
-    color: var(--text-secondary);
-    font-size: 0.85rem;
+    z-index: 1;
 }
 
 .vote-mine {
     color: var(--accent-warning);
     font-weight: 500;
+    font-size: 0.9rem;
+    min-width: 16px;
+}
+
+.fragrantica-link {
+    color: var(--accent-secondary);
+    text-decoration: none;
+    transition: color var(--transition-fast);
+}
+
+.fragrantica-link:hover {
+    color: var(--text-primary);
 }
 
 /* Events */

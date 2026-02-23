@@ -44,15 +44,63 @@ let filters = {
 let sortField = 'brand';
 let sortAscending = true;
 
-// Fragrantica vote categories - matches JSON structure
-const VOTE_CATEGORIES = {
-    'rating_votes': { label: 'Rating', myKey: 'my_rating_votes' },
-    'longevity_votes': { label: 'Longevity', myKey: 'my_longevity_votes' },
-    'sillage_votes': { label: 'Sillage', myKey: 'my_sillage_votes' },
-    'gender_votes': { label: 'Gender', myKey: 'my_gender_votes' },
-    'value_votes': { label: 'Value', myKey: 'my_value_votes' },
-    'season_time_votes': { label: 'Season / Time', myKey: 'my_season_time_votes' }
-};
+// Fragrantica vote categories - matches JSON structure and desktop app
+const VOTE_BLOCKS = [
+    {
+        key: 'rating_votes',
+        myKey: 'my_rating_votes',
+        label: 'Rating',
+        keys: ['love', 'like', 'ok', 'dislike', 'hate'],
+        weights: [5, 4, 3, 2, 1],
+        maxScore: 5,
+        normalize: 'sum'
+    },
+    {
+        key: 'season_time_votes',
+        myKey: 'my_season_time_votes',
+        label: 'When to Wear',
+        keys: ['spring', 'summer', 'fall', 'winter', 'day', 'night'],
+        weights: null,  // no score for season/time
+        maxScore: null,
+        normalize: 'max'
+    },
+    {
+        key: 'longevity_votes',
+        myKey: 'my_longevity_votes',
+        label: 'Longevity',
+        keys: ['eternal', 'long', 'moderate', 'weak', 'poor'],
+        weights: [5, 4, 3, 2, 1],
+        maxScore: 5,
+        normalize: 'sum'
+    },
+    {
+        key: 'sillage_votes',
+        myKey: 'my_sillage_votes',
+        label: 'Sillage',
+        keys: ['enormous', 'strong', 'moderate', 'intimate'],
+        weights: [4, 3, 2, 1],
+        maxScore: 4,
+        normalize: 'sum'
+    },
+    {
+        key: 'gender_votes',
+        myKey: 'my_gender_votes',
+        label: 'Gender',
+        keys: ['male', 'more_male', 'unisex', 'more_female', 'female'],
+        weights: [5, 4, 3, 2, 1],
+        maxScore: 5,
+        normalize: 'sum'
+    },
+    {
+        key: 'value_votes',
+        myKey: 'my_value_votes',
+        label: 'Price Value',
+        keys: ['excellent', 'good', 'fair', 'expensive', 'overpriced'],
+        weights: [5, 4, 3, 2, 1],
+        maxScore: 5,
+        normalize: 'sum'
+    }
+];
 
 // ============================================
 // Initialization
@@ -111,6 +159,46 @@ async function loadData() {
             </div>
         `;
     }
+}
+
+// ============================================
+// Score Calculations
+// ============================================
+
+function calculateScore(votes, block) {
+    if (!block.weights || !votes) return null;
+    
+    const total = block.keys.reduce((sum, k) => sum + (parseInt(votes[k]) || 0), 0);
+    if (total === 0) return null;
+    
+    let weightedSum = 0;
+    block.keys.forEach((k, i) => {
+        weightedSum += (parseInt(votes[k]) || 0) * block.weights[i];
+    });
+    
+    return weightedSum / total;
+}
+
+function normalizeVotes(votes, block) {
+    if (!votes) return block.keys.map(() => 0);
+    
+    if (block.normalize === 'max') {
+        const maxVal = Math.max(...block.keys.map(k => parseInt(votes[k]) || 0));
+        if (maxVal === 0) return block.keys.map(() => 0);
+        return block.keys.map(k => (parseInt(votes[k]) || 0) / maxVal);
+    } else {
+        const total = block.keys.reduce((sum, k) => sum + (parseInt(votes[k]) || 0), 0);
+        if (total === 0) return block.keys.map(() => 0);
+        return block.keys.map(k => (parseInt(votes[k]) || 0) / total);
+    }
+}
+
+function getSampleSize(votes, block) {
+    if (!votes) return 0;
+    if (block.normalize === 'max') {
+        return Math.max(...block.keys.map(k => parseInt(votes[k]) || 0));
+    }
+    return block.keys.reduce((sum, k) => sum + (parseInt(votes[k]) || 0), 0);
 }
 
 // ============================================
@@ -187,23 +275,37 @@ function renderDetailPanel(p) {
 
 function deriveState(p) {
     const events = p.events || [];
-    if (events.length === 0) return 'Wishlist';
+    if (events.length === 0) return 'New';
     
     let ownedMl = 0;
     let hasSmelled = false;
+    let hasOnSkin = false;
     
     for (const e of events) {
-        if (e.event_type === 'smell' || e.event_type === 'skin') {
+        if (e.event_type === 'smell') {
             hasSmelled = true;
+        }
+        if (e.event_type === 'skin') {
+            hasOnSkin = true;
         }
         if (e.ml_delta !== null && e.ml_delta !== undefined) {
             ownedMl += e.ml_delta;
         }
     }
     
-    if (ownedMl > 0) return 'Owned';
-    if (hasSmelled) return 'Smelled';
-    return 'Wishlist';
+    // Check for "want" in tags or event notes
+    const tagNames = (p.tag_ids || []).map(id => (tagsMap[id] || '').toLowerCase());
+    const hasWant = tagNames.some(t => t.includes('want')) || 
+                    events.some(e => (e.note || '').toLowerCase().includes('want'));
+    
+    const parts = [];
+    if (hasSmelled) parts.push('Smelled');
+    if (hasOnSkin) parts.push('On-skin');
+    if (ownedMl > 0) parts.push(`Owned ${ownedMl}ml`);
+    if (hasWant) parts.push('Want');
+    
+    if (parts.length === 0) return 'New';
+    return parts.join(' | ');
 }
 
 function renderNotes(p) {
@@ -243,40 +345,61 @@ function renderFragrantica(p) {
     
     section.classList.remove('hidden');
     
+    // Render Fragrantica URL if available
+    const fragUrl = fragrantica.url || '';
+    const headerEl = section.querySelector('.fragrantica-header .section-title');
+    if (fragUrl) {
+        headerEl.innerHTML = `<a href="${escapeHtml(fragUrl)}" target="_blank" rel="noopener" class="fragrantica-link">Fragrantica ↗</a>`;
+    } else {
+        headerEl.textContent = 'Fragrantica Votes';
+    }
+    
     const blocks = [];
-    for (const [fKey, config] of Object.entries(VOTE_CATEGORIES)) {
-        const fData = fragrantica[fKey] || {};
-        const mData = myVotes[config.myKey] || {};
+    for (const block of VOTE_BLOCKS) {
+        const fData = fragrantica[block.key] || {};
+        const mData = myVotes[block.myKey] || {};
         
-        if (Object.keys(fData).length === 0 && Object.keys(mData).length === 0) continue;
+        const hasBlockData = block.keys.some(k => (fData[k] !== undefined) || (mData[k] !== undefined && mData[k] > 0));
+        if (!hasBlockData) continue;
         
-        const allKeys = [...new Set([...Object.keys(fData), ...Object.keys(mData)])];
-        if (allKeys.length === 0) continue;
+        const normalized = normalizeVotes(fData, block);
+        const score = calculateScore(fData, block);
+        const sampleSize = getSampleSize(fData, block);
         
-        const total = Object.values(fData).reduce((sum, v) => sum + (v || 0), 0);
+        // Build score display
+        let scoreDisplay = '';
+        if (score !== null && block.maxScore) {
+            scoreDisplay = `<span class="block-score">${score.toFixed(1)}</span>`;
+        }
         
-        const items = allKeys.map(k => {
+        // Build items with bar charts
+        const items = block.keys.map((k, i) => {
             const fVal = fData[k];
             const mVal = mData[k];
-            const pct = total > 0 && fVal ? ((fVal / total) * 100).toFixed(1) : null;
+            const barWidth = normalized[i] * 100;
             const hasMyVote = mVal !== undefined && mVal > 0;
+            const displayLabel = k.replace(/_/g, ' ');
             
             return `
                 <div class="vote-item ${hasMyVote ? 'voted' : ''}">
-                    <span class="vote-label">${escapeHtml(k)}</span>
-                    <span class="vote-values">
-                        ${fVal !== undefined ? `<span class="vote-count">${fVal}</span>` : ''}
-                        ${pct !== null ? `<span class="vote-pct">(${pct}%)</span>` : ''}
-                        ${hasMyVote ? `<span class="vote-mine">★</span>` : ''}
-                    </span>
+                    <span class="vote-label">${escapeHtml(displayLabel)}</span>
+                    <div class="vote-bar-container">
+                        <div class="vote-bar" style="width: ${barWidth}%"></div>
+                        <span class="vote-count">${fVal !== undefined ? fVal : ''}</span>
+                    </div>
+                    ${hasMyVote ? '<span class="vote-mine">★</span>' : ''}
                 </div>
             `;
         }).join('');
         
         blocks.push(`
-            <div class="vote-block" data-category="${fKey}">
+            <div class="vote-block" data-category="${block.key}">
                 <div class="vote-block-header">
-                    <span class="vote-block-title">${config.label}</span>
+                    <span class="vote-block-title">${block.label}</span>
+                    <span class="vote-block-info">
+                        ${scoreDisplay}
+                        <span class="block-sample">(n=${sampleSize})</span>
+                    </span>
                     <span class="vote-block-toggle">+</span>
                 </div>
                 <div class="vote-block-content">${items}</div>
