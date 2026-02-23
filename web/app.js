@@ -8,16 +8,13 @@
 // ============================================
 
 const CONFIG = {
-    // Data file URL - use relative path for local, GitHub raw URL for deployment
     dataUrl: getDataUrl(),
 };
 
 function getDataUrl() {
-    // If running on GitHub Pages, use raw GitHub URL
     if (window.location.hostname.includes('github.io')) {
         return 'https://raw.githubusercontent.com/boshow88/Perfume-Tracker/main/data/perfumes.json';
     }
-    // Local development - relative path from web folder
     return '../data/perfumes.json';
 }
 
@@ -30,7 +27,6 @@ let perfumes = [];
 let filteredPerfumes = [];
 let selectedPerfumeId = null;
 
-// Maps for quick lookup
 let brandsMap = {};
 let concentrationsMap = {};
 let outletsMap = {};
@@ -38,7 +34,6 @@ let tagsMap = {};
 let noteTitlesMap = {};
 let purchaseTypesMap = {};
 
-// Filter state
 let filters = {
     brands: [],
     concentrations: [],
@@ -46,19 +41,17 @@ let filters = {
     tags: []
 };
 
-// Sort state
 let sortField = 'brand';
 let sortAscending = true;
 
-// Fragrantica vote block categories
+// Fragrantica vote categories - matches JSON structure
 const VOTE_CATEGORIES = {
-    'main_accords': '主調',
-    'longevity': '持久度',
-    'sillage': '擴散度',
-    'gender': '性別',
-    'price_value': '價值',
-    'seasons': '季節',
-    'time_of_day': '時段'
+    'rating_votes': { label: 'Rating', myKey: 'my_rating_votes' },
+    'longevity_votes': { label: 'Longevity', myKey: 'my_longevity_votes' },
+    'sillage_votes': { label: 'Sillage', myKey: 'my_sillage_votes' },
+    'gender_votes': { label: 'Gender', myKey: 'my_gender_votes' },
+    'value_votes': { label: 'Value', myKey: 'my_value_votes' },
+    'season_time_votes': { label: 'Season / Time', myKey: 'my_season_time_votes' }
 };
 
 // ============================================
@@ -73,21 +66,14 @@ async function init() {
 }
 
 function setupEventListeners() {
-    // Search
     document.getElementById('search-input').addEventListener('input', debounce(handleSearch, 300));
-    
-    // Sort
     document.getElementById('sort-select').addEventListener('change', handleSortChange);
     document.getElementById('sort-dir-btn').addEventListener('click', handleSortDirToggle);
-    
-    // Filter
     document.getElementById('filter-btn').addEventListener('click', openFilterModal);
     document.getElementById('filter-apply').addEventListener('click', applyFilters);
     document.getElementById('filter-clear').addEventListener('click', clearFilters);
     document.querySelector('.modal-close').addEventListener('click', closeFilterModal);
     document.querySelector('.modal-backdrop').addEventListener('click', closeFilterModal);
-    
-    // Detail panel
     document.getElementById('close-detail').addEventListener('click', closeDetailPanel);
     document.getElementById('toggle-all-votes').addEventListener('click', toggleAllVoteBlocks);
 }
@@ -104,7 +90,6 @@ async function loadData() {
         }
         appData = await response.json();
         
-        // Build maps
         brandsMap = appData.brands_map || {};
         concentrationsMap = appData.concentrations_map || {};
         outletsMap = appData.outlets_map || {};
@@ -114,7 +99,6 @@ async function loadData() {
         
         perfumes = appData.perfumes || [];
         
-        // Initial render
         applyFiltersAndSort();
         populateFilterOptions();
         
@@ -122,7 +106,7 @@ async function loadData() {
         console.error('Failed to load data:', error);
         document.getElementById('perfume-list').innerHTML = `
             <div class="no-results">
-                <p>無法載入資料</p>
+                <p>Failed to load data</p>
                 <p style="font-size: 0.85rem; margin-top: 8px;">${error.message}</p>
             </div>
         `;
@@ -138,13 +122,13 @@ function renderPerfumeList() {
     const countEl = document.getElementById('perfume-count');
     
     if (filteredPerfumes.length === 0) {
-        container.innerHTML = '<div class="no-results">沒有符合條件的香水</div>';
-        countEl.textContent = '0 支香水';
+        container.innerHTML = '<div class="no-results">No matching perfumes</div>';
+        countEl.textContent = '0 perfumes';
         return;
     }
     
     container.innerHTML = filteredPerfumes.map(p => {
-        const brand = brandsMap[p.brand_id] || '未知品牌';
+        const brand = brandsMap[p.brand_id] || 'Unknown';
         const conc = concentrationsMap[p.concentration_id] || '';
         const locations = (p.outlet_ids || [])
             .map(id => outletsMap[id]?.name || '')
@@ -162,9 +146,8 @@ function renderPerfumeList() {
         `;
     }).join('');
     
-    countEl.textContent = `${filteredPerfumes.length} 支香水`;
+    countEl.textContent = `${filteredPerfumes.length} perfumes`;
     
-    // Add click handlers
     container.querySelectorAll('.perfume-item').forEach(el => {
         el.addEventListener('click', () => selectPerfume(el.dataset.id));
     });
@@ -173,12 +156,10 @@ function renderPerfumeList() {
 function selectPerfume(id) {
     selectedPerfumeId = id;
     
-    // Update selection in list
     document.querySelectorAll('.perfume-item').forEach(el => {
         el.classList.toggle('selected', el.dataset.id === id);
     });
     
-    // Find perfume
     const perfume = perfumes.find(p => p.id === id);
     if (!perfume) return;
     
@@ -189,49 +170,39 @@ function renderDetailPanel(p) {
     const panel = document.getElementById('detail-panel');
     panel.classList.remove('hidden');
     
-    // Header
-    const brand = brandsMap[p.brand_id] || '未知品牌';
+    const brand = brandsMap[p.brand_id] || 'Unknown';
     const conc = concentrationsMap[p.concentration_id] || '';
     document.getElementById('detail-brand').textContent = brand;
     document.getElementById('detail-name-conc').textContent = conc ? `${p.name} · ${conc}` : p.name;
     
-    // State
-    const state = getOwnershipState(p);
+    const state = deriveState(p);
     document.getElementById('detail-state').textContent = state;
     
-    // Notes
     renderNotes(p);
-    
-    // Fragrantica
     renderFragrantica(p);
-    
-    // Events
     renderEvents(p);
-    
-    // Links
     renderLinks(p);
-    
-    // Tags
     renderTags(p);
 }
 
-function getOwnershipState(p) {
+function deriveState(p) {
     const events = p.events || [];
     if (events.length === 0) return 'Wishlist';
     
-    // Calculate ownership
-    let owned = 0;
+    let ownedMl = 0;
+    let hasSmelled = false;
+    
     for (const e of events) {
-        const type = e.purchase_type || e.type;
-        if (type === 'sold' || type === 'gave_away') {
-            owned--;
-        } else {
-            owned++;
+        if (e.event_type === 'smell' || e.event_type === 'skin') {
+            hasSmelled = true;
+        }
+        if (e.ml_delta !== null && e.ml_delta !== undefined) {
+            ownedMl += e.ml_delta;
         }
     }
     
-    if (owned > 0) return 'Owned';
-    if (owned < 0) return 'Previously Owned';
+    if (ownedMl > 0) return 'Owned';
+    if (hasSmelled) return 'Smelled';
     return 'Wishlist';
 }
 
@@ -247,7 +218,7 @@ function renderNotes(p) {
     
     section.classList.remove('hidden');
     content.innerHTML = notes.map(note => {
-        const title = noteTitlesMap[note.title_id] || note.title_id || '筆記';
+        const title = note.title || 'Note';
         return `
             <div class="note-item">
                 <div class="note-title">${escapeHtml(title)}</div>
@@ -263,8 +234,8 @@ function renderFragrantica(p) {
     const fragrantica = p.fragrantica || {};
     const myVotes = p.my_votes || {};
     
-    // Check if there's any data
-    const hasData = Object.keys(fragrantica).length > 0 || Object.keys(myVotes).length > 0;
+    const hasData = Object.keys(fragrantica).some(k => k.endsWith('_votes')) || 
+                    Object.keys(myVotes).some(k => k.endsWith('_votes'));
     if (!hasData) {
         section.classList.add('hidden');
         return;
@@ -272,37 +243,41 @@ function renderFragrantica(p) {
     
     section.classList.remove('hidden');
     
-    // Render vote blocks
     const blocks = [];
-    for (const [key, label] of Object.entries(VOTE_CATEGORIES)) {
-        const fData = fragrantica[key] || {};
-        const mData = myVotes[key] || {};
+    for (const [fKey, config] of Object.entries(VOTE_CATEGORIES)) {
+        const fData = fragrantica[fKey] || {};
+        const mData = myVotes[config.myKey] || {};
         
         if (Object.keys(fData).length === 0 && Object.keys(mData).length === 0) continue;
         
-        // Merge keys
         const allKeys = [...new Set([...Object.keys(fData), ...Object.keys(mData)])];
         if (allKeys.length === 0) continue;
+        
+        const total = Object.values(fData).reduce((sum, v) => sum + (v || 0), 0);
         
         const items = allKeys.map(k => {
             const fVal = fData[k];
             const mVal = mData[k];
+            const pct = total > 0 && fVal ? ((fVal / total) * 100).toFixed(1) : null;
+            const hasMyVote = mVal !== undefined && mVal > 0;
+            
             return `
-                <div class="vote-item">
+                <div class="vote-item ${hasMyVote ? 'voted' : ''}">
                     <span class="vote-label">${escapeHtml(k)}</span>
                     <span class="vote-values">
-                        ${fVal !== undefined ? `<span class="vote-fragrantica">${fVal}%</span>` : ''}
-                        ${mVal !== undefined ? `<span class="vote-mine">★</span>` : ''}
+                        ${fVal !== undefined ? `<span class="vote-count">${fVal}</span>` : ''}
+                        ${pct !== null ? `<span class="vote-pct">(${pct}%)</span>` : ''}
+                        ${hasMyVote ? `<span class="vote-mine">★</span>` : ''}
                     </span>
                 </div>
             `;
         }).join('');
         
         blocks.push(`
-            <div class="vote-block" data-category="${key}">
+            <div class="vote-block" data-category="${fKey}">
                 <div class="vote-block-header">
-                    <span class="vote-block-title">${label}</span>
-                    <span class="vote-block-toggle">＋</span>
+                    <span class="vote-block-title">${config.label}</span>
+                    <span class="vote-block-toggle">+</span>
                 </div>
                 <div class="vote-block-content">${items}</div>
             </div>
@@ -311,13 +286,12 @@ function renderFragrantica(p) {
     
     content.innerHTML = blocks.join('');
     
-    // Add toggle handlers
     content.querySelectorAll('.vote-block-header').forEach(header => {
         header.addEventListener('click', () => {
             const block = header.closest('.vote-block');
             block.classList.toggle('expanded');
             header.querySelector('.vote-block-toggle').textContent = 
-                block.classList.contains('expanded') ? '－' : '＋';
+                block.classList.contains('expanded') ? '-' : '+';
             updateToggleAllButton();
         });
     });
@@ -332,10 +306,10 @@ function toggleAllVoteBlocks() {
     blocks.forEach(block => {
         if (allExpanded) {
             block.classList.remove('expanded');
-            block.querySelector('.vote-block-toggle').textContent = '＋';
+            block.querySelector('.vote-block-toggle').textContent = '+';
         } else {
             block.classList.add('expanded');
-            block.querySelector('.vote-block-toggle').textContent = '－';
+            block.querySelector('.vote-block-toggle').textContent = '-';
         }
     });
     
@@ -348,7 +322,7 @@ function updateToggleAllButton() {
     if (blocks.length === 0) return;
     
     const allExpanded = Array.from(blocks).every(b => b.classList.contains('expanded'));
-    btn.textContent = allExpanded ? '－－' : '＋＋';
+    btn.textContent = allExpanded ? '--' : '++';
 }
 
 function renderEvents(p) {
@@ -363,18 +337,22 @@ function renderEvents(p) {
     
     section.classList.remove('hidden');
     content.innerHTML = events.map(e => {
-        const type = purchaseTypesMap[e.purchase_type] || e.purchase_type || e.type || '購買';
-        const date = e.date || '';
+        const eventType = e.event_type || 'event';
+        const purchaseType = e.purchase_type || purchaseTypesMap[e.purchase_type_id] || '';
+        const date = e.event_date || e.timestamp?.split('T')[0] || '';
+        const location = e.location || '';
+        
         const details = [];
-        if (e.size) details.push(e.size);
-        if (e.price) details.push(`$${e.price}`);
-        if (e.source) details.push(e.source);
+        if (purchaseType) details.push(`[${purchaseType}]`);
+        if (e.ml_delta) details.push(`${e.ml_delta}ml`);
+        if (e.price !== null && e.price !== undefined) details.push(`$${e.price}`);
+        if (location) details.push(`@${location}`);
         
         return `
             <div class="event-item">
                 <div class="event-info">
-                    <span class="event-type">${escapeHtml(type)}</span>
-                    ${details.length > 0 ? `<span class="event-details">${escapeHtml(details.join(' · '))}</span>` : ''}
+                    <span class="event-type">${escapeHtml(eventType)}</span>
+                    ${details.length > 0 ? `<span class="event-details">${escapeHtml(details.join(' '))}</span>` : ''}
                 </div>
                 <span class="event-date">${escapeHtml(date)}</span>
             </div>
@@ -435,34 +413,32 @@ function closeDetailPanel() {
 function applyFiltersAndSort() {
     const searchTerm = document.getElementById('search-input').value.toLowerCase().trim();
     
-    // Filter
     filteredPerfumes = perfumes.filter(p => {
-        // Search filter
         if (searchTerm) {
             const brand = (brandsMap[p.brand_id] || '').toLowerCase();
             const name = (p.name || '').toLowerCase();
-            if (!brand.includes(searchTerm) && !name.includes(searchTerm)) {
+            const tagNames = (p.tag_ids || []).map(id => (tagsMap[id] || '').toLowerCase()).join(' ');
+            const notesText = (p.notes || []).map(n => `${n.title || ''} ${n.content || ''}`).join(' ').toLowerCase();
+            
+            const searchable = `${brand} ${name} ${tagNames} ${notesText}`;
+            if (!searchable.includes(searchTerm)) {
                 return false;
             }
         }
         
-        // Brand filter
         if (filters.brands.length > 0 && !filters.brands.includes(p.brand_id)) {
             return false;
         }
         
-        // Concentration filter
         if (filters.concentrations.length > 0 && !filters.concentrations.includes(p.concentration_id)) {
             return false;
         }
         
-        // Location filter
         if (filters.locations.length > 0) {
             const hasLocation = (p.outlet_ids || []).some(id => filters.locations.includes(id));
             if (!hasLocation) return false;
         }
         
-        // Tag filter
         if (filters.tags.length > 0) {
             const hasTag = (p.tag_ids || []).some(id => filters.tags.includes(id));
             if (!hasTag) return false;
@@ -471,7 +447,6 @@ function applyFiltersAndSort() {
         return true;
     });
     
-    // Sort
     filteredPerfumes.sort((a, b) => {
         let valA, valB;
         
@@ -532,27 +507,23 @@ function handleSortDirToggle() {
 // ============================================
 
 function populateFilterOptions() {
-    // Brands
     const brandSelect = document.getElementById('filter-brand');
     brandSelect.innerHTML = Object.entries(brandsMap)
         .sort((a, b) => a[1].localeCompare(b[1], 'zh-TW'))
         .map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`)
         .join('');
     
-    // Concentrations
     const concSelect = document.getElementById('filter-concentration');
     concSelect.innerHTML = Object.entries(concentrationsMap)
         .map(([id, name]) => `<option value="${id}">${escapeHtml(name)}</option>`)
         .join('');
     
-    // Locations (outletsMap values are {name, region} objects)
     const locSelect = document.getElementById('filter-location');
     locSelect.innerHTML = Object.entries(outletsMap)
         .sort((a, b) => (a[1].name || '').localeCompare(b[1].name || '', 'zh-TW'))
         .map(([id, info]) => `<option value="${id}">${escapeHtml(info.name || '')}</option>`)
         .join('');
     
-    // Tags
     const tagSelect = document.getElementById('filter-tag');
     tagSelect.innerHTML = Object.entries(tagsMap)
         .sort((a, b) => a[1].localeCompare(b[1], 'zh-TW'))
@@ -564,7 +535,6 @@ function openFilterModal() {
     const modal = document.getElementById('filter-modal');
     modal.classList.remove('hidden');
     
-    // Set current selections
     setSelectValues('filter-brand', filters.brands);
     setSelectValues('filter-concentration', filters.concentrations);
     setSelectValues('filter-location', filters.locations);
@@ -588,7 +558,6 @@ function applyFilters() {
 function clearFilters() {
     filters = { brands: [], concentrations: [], locations: [], tags: [] };
     
-    // Clear selections in modal
     ['filter-brand', 'filter-concentration', 'filter-location', 'filter-tag'].forEach(id => {
         const select = document.getElementById(id);
         Array.from(select.options).forEach(opt => opt.selected = false);

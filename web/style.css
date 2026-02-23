@@ -554,8 +554,13 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: var(--space-xs) 0;
+    padding: var(--space-xs) var(--space-sm);
     font-size: 0.9rem;
+    border-radius: var(--radius-sm);
+}
+
+.vote-item.voted {
+    background: rgba(253, 203, 110, 0.15);
 }
 
 .vote-label {
@@ -564,15 +569,21 @@ body {
 
 .vote-values {
     display: flex;
-    gap: var(--space-md);
+    align-items: center;
+    gap: var(--space-sm);
 }
 
-.vote-fragrantica {
+.vote-count {
     color: var(--text-muted);
 }
 
+.vote-pct {
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+}
+
 .vote-mine {
-    color: var(--accent-success);
+    color: var(--accent-warning);
     font-weight: 500;
 }
 

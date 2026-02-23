@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-TW">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -17,7 +17,7 @@
             <div class="header-actions">
                 <button id="filter-btn" class="btn btn-filter">
                     <span class="icon">⚙</span>
-                    <span class="label">篩選</span>
+                    <span class="label">Filter</span>
                 </button>
             </div>
         </header>
@@ -25,18 +25,18 @@
         <!-- Search & Sort Bar -->
         <div class="toolbar">
             <div class="search-box">
-                <input type="text" id="search-input" placeholder="搜尋香水...">
+                <input type="text" id="search-input" placeholder="Search perfumes...">
                 <span class="search-icon">🔍</span>
             </div>
             <div class="sort-box">
-                <label>排序：</label>
+                <label>Sort:</label>
                 <select id="sort-select">
-                    <option value="brand">品牌</option>
-                    <option value="name">名稱</option>
-                    <option value="concentration">濃度</option>
-                    <option value="created">新增時間</option>
+                    <option value="brand">Brand</option>
+                    <option value="name">Name</option>
+                    <option value="concentration">Concentration</option>
+                    <option value="created">Created</option>
                 </select>
-                <button id="sort-dir-btn" class="btn btn-icon" title="切換排序方向">▲</button>
+                <button id="sort-dir-btn" class="btn btn-icon" title="Toggle sort direction">▲</button>
             </div>
         </div>
 
@@ -48,16 +48,16 @@
             <!-- Perfume List -->
             <section class="perfume-list-section">
                 <div class="list-header">
-                    <span class="col-brand">品牌</span>
-                    <span class="col-name">名稱</span>
-                    <span class="col-conc">濃度</span>
-                    <span class="col-location">位置</span>
+                    <span class="col-brand">Brand</span>
+                    <span class="col-name">Name</span>
+                    <span class="col-conc">Conc.</span>
+                    <span class="col-location">Location</span>
                 </div>
                 <div id="perfume-list" class="perfume-list">
-                    <div class="loading">載入中...</div>
+                    <div class="loading">Loading...</div>
                 </div>
                 <div class="list-footer">
-                    <span id="perfume-count">0 支香水</span>
+                    <span id="perfume-count">0 perfumes</span>
                 </div>
             </section>
 
@@ -73,34 +73,34 @@
 
                 <!-- Notes Section -->
                 <section id="notes-section" class="detail-section hidden">
-                    <h4 class="section-title">筆記</h4>
+                    <h4 class="section-title">Notes</h4>
                     <div id="notes-content" class="notes-content"></div>
                 </section>
 
                 <!-- Fragrantica Section -->
                 <section id="fragrantica-section" class="detail-section hidden">
                     <div class="fragrantica-header">
-                        <h4 class="section-title">Fragrantica 投票</h4>
-                        <button id="toggle-all-votes" class="btn btn-small">＋＋</button>
+                        <h4 class="section-title">Fragrantica Votes</h4>
+                        <button id="toggle-all-votes" class="btn btn-small">++</button>
                     </div>
                     <div id="fragrantica-content" class="fragrantica-content"></div>
                 </section>
 
                 <!-- Events Section -->
                 <section id="events-section" class="detail-section hidden">
-                    <h4 class="section-title">購買紀錄</h4>
+                    <h4 class="section-title">Events</h4>
                     <div id="events-content" class="events-content"></div>
                 </section>
 
                 <!-- Links Section -->
                 <section id="links-section" class="detail-section hidden">
-                    <h4 class="section-title">連結</h4>
+                    <h4 class="section-title">Links</h4>
                     <div id="links-content" class="links-content"></div>
                 </section>
 
                 <!-- Tags Section -->
                 <section id="tags-section" class="detail-section hidden">
-                    <h4 class="section-title">標籤</h4>
+                    <h4 class="section-title">Tags</h4>
                     <div id="tags-content" class="tags-content"></div>
                 </section>
             </aside>
@@ -111,34 +111,34 @@
             <div class="modal-backdrop"></div>
             <div class="modal-content">
                 <div class="modal-header">
-                    <h3>篩選條件</h3>
+                    <h3>Filters</h3>
                     <button class="btn-close modal-close">✕</button>
                 </div>
                 <div class="modal-body">
                     <!-- Brand Filter -->
                     <div class="filter-group">
-                        <label>品牌</label>
+                        <label>Brand</label>
                         <select id="filter-brand" multiple></select>
                     </div>
                     <!-- Concentration Filter -->
                     <div class="filter-group">
-                        <label>濃度</label>
+                        <label>Concentration</label>
                         <select id="filter-concentration" multiple></select>
                     </div>
                     <!-- Location Filter -->
                     <div class="filter-group">
-                        <label>位置</label>
+                        <label>Location</label>
                         <select id="filter-location" multiple></select>
                     </div>
                     <!-- Tag Filter -->
                     <div class="filter-group">
-                        <label>標籤</label>
+                        <label>Tags</label>
                         <select id="filter-tag" multiple></select>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button id="filter-clear" class="btn btn-secondary">清除全部</button>
-                    <button id="filter-apply" class="btn btn-primary">套用</button>
+                    <button id="filter-clear" class="btn btn-secondary">Clear All</button>
+                    <button id="filter-apply" class="btn btn-primary">Apply</button>
                 </div>
             </div>
         </div>
