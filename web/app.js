@@ -114,14 +114,30 @@ async function init() {
 }
 
 function setupEventListeners() {
+    // Search
     document.getElementById('search-input').addEventListener('input', debounce(handleSearch, 300));
-    document.getElementById('sort-select').addEventListener('change', handleSortChange);
-    document.getElementById('sort-dir-btn').addEventListener('click', handleSortDirToggle);
+    
+    // Sort modal
+    document.getElementById('sort-btn').addEventListener('click', openSortModal);
+    document.getElementById('sort-apply').addEventListener('click', applySortFromModal);
+    document.getElementById('sort-clear').addEventListener('click', resetSort);
+    document.getElementById('sort-asc').addEventListener('click', () => setSortDirection(true));
+    document.getElementById('sort-desc').addEventListener('click', () => setSortDirection(false));
+    
+    // Filter modal
     document.getElementById('filter-btn').addEventListener('click', openFilterModal);
     document.getElementById('filter-apply').addEventListener('click', applyFilters);
     document.getElementById('filter-clear').addEventListener('click', clearFilters);
-    document.querySelector('.modal-close').addEventListener('click', closeFilterModal);
-    document.querySelector('.modal-backdrop').addEventListener('click', closeFilterModal);
+    
+    // Modal close buttons
+    document.querySelectorAll('.modal-close').forEach(btn => {
+        btn.addEventListener('click', closeAllModals);
+    });
+    document.querySelectorAll('.modal-backdrop').forEach(backdrop => {
+        backdrop.addEventListener('click', closeAllModals);
+    });
+    
+    // Detail panel
     document.getElementById('close-detail').addEventListener('click', closeDetailPanel);
     document.getElementById('toggle-all-votes').addEventListener('click', toggleAllVoteBlocks);
 }
@@ -199,6 +215,67 @@ function getSampleSize(votes, block) {
         return Math.max(...block.keys.map(k => parseInt(votes[k]) || 0));
     }
     return block.keys.reduce((sum, k) => sum + (parseInt(votes[k]) || 0), 0);
+}
+
+function getPerfumeScore(p, voteKey) {
+    const block = VOTE_BLOCKS.find(b => b.key === voteKey);
+    if (!block || !p.fragrantica) return null;
+    return calculateScore(p.fragrantica[voteKey], block);
+}
+
+function getStatePriority(p) {
+    const state = deriveState(p);
+    if (state.includes('Owned')) return 0;
+    if (state.includes('Smelled') || state.includes('On-skin')) return 1;
+    if (state.includes('Want')) return 2;
+    if (state === 'New') return 3;
+    return 4;
+}
+
+function getStateCategory(p) {
+    const events = p.events || [];
+    if (events.length === 0) return 'new';
+    
+    let ownedMl = 0;
+    for (const e of events) {
+        if (e.ml_delta !== null && e.ml_delta !== undefined) {
+            ownedMl += e.ml_delta;
+        }
+    }
+    
+    if (ownedMl > 0) return 'owned';
+    
+    const hasSmelled = events.some(e => e.event_type === 'smell' || e.event_type === 'skin');
+    if (hasSmelled) return 'smelled';
+    
+    return 'new';
+}
+
+function getScoreForSort(p, scoreType) {
+    const fragrantica = p.fragrantica || {};
+    
+    const blockMap = {
+        'rating': VOTE_BLOCKS.find(b => b.key === 'rating_votes'),
+        'longevity': VOTE_BLOCKS.find(b => b.key === 'longevity_votes'),
+        'sillage': VOTE_BLOCKS.find(b => b.key === 'sillage_votes'),
+        'gender': VOTE_BLOCKS.find(b => b.key === 'gender_votes'),
+        'value': VOTE_BLOCKS.find(b => b.key === 'value_votes')
+    };
+    
+    const block = blockMap[scoreType];
+    if (!block) return null;
+    
+    const votes = fragrantica[block.key];
+    return calculateScore(votes, block);
+}
+
+function getStatePriority(p, ownedFirst = true) {
+    const cat = getStateCategory(p);
+    if (ownedFirst) {
+        return { 'owned': 0, 'smelled': 1, 'new': 2 }[cat] ?? 3;
+    } else {
+        return { 'smelled': 0, 'owned': 1, 'new': 2 }[cat] ?? 3;
+    }
 }
 
 // ============================================
@@ -585,6 +662,22 @@ function applyFiltersAndSort() {
                 valA = (concentrationsMap[a.concentration_id] || '').toLowerCase();
                 valB = (concentrationsMap[b.concentration_id] || '').toLowerCase();
                 break;
+            case 'state':
+                valA = getStatePriority(a);
+                valB = getStatePriority(b);
+                break;
+            case 'rating':
+                valA = getPerfumeScore(a, 'rating_votes') || 0;
+                valB = getPerfumeScore(b, 'rating_votes') || 0;
+                break;
+            case 'longevity':
+                valA = getPerfumeScore(a, 'longevity_votes') || 0;
+                valB = getPerfumeScore(b, 'longevity_votes') || 0;
+                break;
+            case 'sillage':
+                valA = getPerfumeScore(a, 'sillage_votes') || 0;
+                valB = getPerfumeScore(b, 'sillage_votes') || 0;
+                break;
             case 'created':
                 valA = a.created_at || 0;
                 valB = b.created_at || 0;
@@ -607,21 +700,66 @@ function applyFiltersAndSort() {
     renderPerfumeList();
     updateActiveFiltersDisplay();
     updateFilterButtonState();
+    updateSortButtonState();
 }
 
 function handleSearch() {
     applyFiltersAndSort();
 }
 
-function handleSortChange(e) {
-    sortField = e.target.value;
-    applyFiltersAndSort();
+// ============================================
+// Sort Modal
+// ============================================
+
+function openSortModal() {
+    const modal = document.getElementById('sort-modal');
+    modal.classList.remove('hidden');
+    
+    // Set current values
+    document.getElementById('sort-field').value = sortField;
+    updateSortDirectionButtons();
 }
 
-function handleSortDirToggle() {
-    sortAscending = !sortAscending;
-    document.getElementById('sort-dir-btn').textContent = sortAscending ? '▲' : '▼';
+function closeSortModal() {
+    document.getElementById('sort-modal').classList.add('hidden');
+}
+
+function applySortFromModal() {
+    sortField = document.getElementById('sort-field').value;
+    closeSortModal();
     applyFiltersAndSort();
+    updateSortButtonState();
+}
+
+function resetSort() {
+    sortField = 'brand';
+    sortAscending = true;
+    document.getElementById('sort-field').value = 'brand';
+    updateSortDirectionButtons();
+    closeSortModal();
+    applyFiltersAndSort();
+    updateSortButtonState();
+}
+
+function setSortDirection(ascending) {
+    sortAscending = ascending;
+    updateSortDirectionButtons();
+}
+
+function updateSortDirectionButtons() {
+    document.getElementById('sort-asc').classList.toggle('active', sortAscending);
+    document.getElementById('sort-desc').classList.toggle('active', !sortAscending);
+}
+
+function closeAllModals() {
+    document.getElementById('sort-modal').classList.add('hidden');
+    document.getElementById('filter-modal').classList.add('hidden');
+}
+
+function updateSortButtonState() {
+    const btn = document.getElementById('sort-btn');
+    const isNonDefault = sortField !== 'brand' || !sortAscending;
+    btn.classList.toggle('active', isNonDefault);
 }
 
 // ============================================
@@ -663,17 +801,13 @@ function openFilterModal() {
     setSelectValues('filter-tag', filters.tags);
 }
 
-function closeFilterModal() {
-    document.getElementById('filter-modal').classList.add('hidden');
-}
-
 function applyFilters() {
     filters.brands = getSelectValues('filter-brand');
     filters.concentrations = getSelectValues('filter-concentration');
     filters.locations = getSelectValues('filter-location');
     filters.tags = getSelectValues('filter-tag');
     
-    closeFilterModal();
+    closeAllModals();
     applyFiltersAndSort();
 }
 
@@ -685,7 +819,7 @@ function clearFilters() {
         Array.from(select.options).forEach(opt => opt.selected = false);
     });
     
-    closeFilterModal();
+    closeAllModals();
     applyFiltersAndSort();
 }
 

@@ -175,7 +175,15 @@ body {
     color: var(--text-primary);
 }
 
-.btn-filter.active {
+.btn-action {
+    gap: 6px;
+}
+
+.btn-action .icon {
+    font-size: 1rem;
+}
+
+.btn-action.active {
     background: var(--accent-primary);
     border-color: var(--accent-primary);
 }
@@ -774,6 +782,54 @@ body {
     gap: var(--space-sm);
     padding: var(--space-md) var(--space-lg);
     border-top: 1px solid var(--border-color);
+}
+
+.modal-small {
+    max-width: 350px;
+}
+
+/* Sort Groups */
+.sort-group {
+    margin-bottom: var(--space-lg);
+}
+
+.sort-group:last-child {
+    margin-bottom: 0;
+}
+
+.sort-group label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-sm);
+}
+
+.sort-group select {
+    width: 100%;
+    padding: var(--space-sm) var(--space-md);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.95rem;
+}
+
+.sort-direction {
+    display: flex;
+    gap: var(--space-sm);
+}
+
+.btn-dir {
+    flex: 1;
+    justify-content: center;
+    background: var(--bg-card);
+}
+
+.btn-dir.active {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
 }
 
 /* Filter Groups */

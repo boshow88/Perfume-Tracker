@@ -15,28 +15,22 @@
         <header class="header">
             <h1 class="logo">Perfume Tracker</h1>
             <div class="header-actions">
-                <button id="filter-btn" class="btn btn-filter">
-                    <span class="icon">⚙</span>
+                <button id="sort-btn" class="btn btn-action">
+                    <span class="icon">↕</span>
+                    <span class="label">Sort</span>
+                </button>
+                <button id="filter-btn" class="btn btn-action">
+                    <span class="icon">⏚</span>
                     <span class="label">Filter</span>
                 </button>
             </div>
         </header>
 
-        <!-- Search & Sort Bar -->
+        <!-- Search Bar -->
         <div class="toolbar">
             <div class="search-box">
                 <input type="text" id="search-input" placeholder="Search perfumes...">
                 <span class="search-icon">🔍</span>
-            </div>
-            <div class="sort-box">
-                <label>Sort:</label>
-                <select id="sort-select">
-                    <option value="brand">Brand</option>
-                    <option value="name">Name</option>
-                    <option value="concentration">Concentration</option>
-                    <option value="created">Created</option>
-                </select>
-                <button id="sort-dir-btn" class="btn btn-icon" title="Toggle sort direction">▲</button>
             </div>
         </div>
 
@@ -105,6 +99,43 @@
                 </section>
             </aside>
         </main>
+
+        <!-- Sort Modal -->
+        <div id="sort-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-small">
+                <div class="modal-header">
+                    <h3>Sort</h3>
+                    <button class="btn-close modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="sort-group">
+                        <label>Sort by</label>
+                        <select id="sort-field">
+                            <option value="brand">Brand</option>
+                            <option value="name">Name</option>
+                            <option value="concentration">Concentration</option>
+                            <option value="state">State</option>
+                            <option value="rating">Rating</option>
+                            <option value="longevity">Longevity</option>
+                            <option value="sillage">Sillage</option>
+                            <option value="created">Created</option>
+                        </select>
+                    </div>
+                    <div class="sort-group">
+                        <label>Direction</label>
+                        <div class="sort-direction">
+                            <button id="sort-asc" class="btn btn-dir active">▲ Ascending</button>
+                            <button id="sort-desc" class="btn btn-dir">▼ Descending</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="sort-clear" class="btn btn-secondary">Reset</button>
+                    <button id="sort-apply" class="btn btn-primary">Apply</button>
+                </div>
+            </div>
+        </div>
 
         <!-- Filter Modal -->
         <div id="filter-modal" class="modal hidden">
