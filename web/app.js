@@ -381,13 +381,12 @@ function renderFragrantica(p) {
             const displayLabel = k.replace(/_/g, ' ');
             
             return `
-                <div class="vote-item ${hasMyVote ? 'voted' : ''}">
-                    <span class="vote-label">${escapeHtml(displayLabel)}</span>
+                <div class="vote-item">
+                    <span class="vote-label">${hasMyVote ? '<span class="vote-marker">●</span>' : ''}<span class="label-text">${escapeHtml(displayLabel)}</span></span>
                     <div class="vote-bar-container">
-                        <div class="vote-bar" style="width: ${barWidth}%"></div>
+                        <div class="vote-bar ${hasMyVote ? 'voted' : ''}" style="width: ${barWidth}%"></div>
                         <span class="vote-count">${fVal !== undefined ? fVal : ''}</span>
                     </div>
-                    ${hasMyVote ? '<span class="vote-mine">★</span>' : ''}
                 </div>
             `;
         }).join('');

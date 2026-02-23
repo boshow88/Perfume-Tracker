@@ -581,16 +581,20 @@ body {
     gap: var(--space-sm);
 }
 
-.vote-item.voted {
-    background: rgba(253, 203, 110, 0.12);
-    border-radius: var(--radius-sm);
-    padding-left: var(--space-xs);
-    padding-right: var(--space-xs);
-}
-
 .vote-label {
     color: var(--text-secondary);
-    min-width: 80px;
+    min-width: 90px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.vote-marker {
+    color: var(--accent-warning);
+    font-size: 0.6rem;
+}
+
+.label-text {
     text-transform: capitalize;
 }
 
@@ -614,19 +618,16 @@ body {
     min-width: 0;
 }
 
+.vote-bar.voted {
+    background: linear-gradient(90deg, #e17055, #fdcb6e);
+}
+
 .vote-count {
     position: absolute;
     right: var(--space-xs);
     font-size: 0.75rem;
     color: var(--text-muted);
     z-index: 1;
-}
-
-.vote-mine {
-    color: var(--accent-warning);
-    font-weight: 500;
-    font-size: 0.9rem;
-    min-width: 16px;
 }
 
 .fragrantica-link {
