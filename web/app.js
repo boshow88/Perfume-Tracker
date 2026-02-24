@@ -265,14 +265,23 @@ function checkScoreFilter(p, scoreType, filter, maxVal) {
     return true;
 }
 
+// Get index of an ID in a map (for custom order sorting)
+function getMapIndex(map, id) {
+    const keys = Object.keys(map);
+    const index = keys.indexOf(id);
+    return index >= 0 ? index : keys.length; // Put unknown IDs at the end
+}
+
 function getSortValue(p, field) {
     switch (field) {
         case 'brand':
-            return (brandsMap[p.brand_id] || '').toLowerCase();
+            // Use map order (user's custom order from desktop)
+            return getMapIndex(brandsMap, p.brand_id);
         case 'name':
             return (p.name || '').toLowerCase();
         case 'concentration':
-            return (concentrationsMap[p.concentration_id] || '').toLowerCase();
+            // Use map order (user's custom order from desktop)
+            return getMapIndex(concentrationsMap, p.concentration_id);
         case 'state':
             return getStatePriority(p);
         case 'rating':
