@@ -788,24 +788,87 @@ body {
     max-width: 350px;
 }
 
-/* Sort Groups */
-.sort-group {
-    margin-bottom: var(--space-lg);
+/* Sort Dimensions */
+.sort-dimensions {
+    min-height: 60px;
+    margin-bottom: var(--space-md);
 }
 
-.sort-group:last-child {
+.sort-empty {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    text-align: center;
+    padding: var(--space-md);
+}
+
+.sort-dimension-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: var(--space-sm);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-xs);
+}
+
+.sort-dimension-item:last-child {
     margin-bottom: 0;
 }
 
-.sort-group label {
-    display: block;
-    font-size: 0.9rem;
-    font-weight: 500;
-    color: var(--text-secondary);
-    margin-bottom: var(--space-sm);
+.sort-dimension-num {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    min-width: 20px;
 }
 
-.sort-group select {
+.sort-dimension-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.sort-dimension-dir {
+    display: flex;
+    gap: 2px;
+}
+
+.sort-dimension-dir button {
+    padding: 4px 8px;
+    font-size: 0.75rem;
+    background: var(--bg-main);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xs);
+    cursor: pointer;
+    color: var(--text-muted);
+    transition: all var(--transition-fast);
+}
+
+.sort-dimension-dir button.active {
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+    color: white;
+}
+
+.sort-dimension-dir button:hover:not(.active) {
+    border-color: var(--accent-secondary);
+}
+
+.sort-dimension-remove {
+    padding: 4px 8px;
+    font-size: 0.8rem;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-xs);
+}
+
+.sort-dimension-remove:hover {
+    background: rgba(255, 100, 100, 0.2);
+    color: #ff6666;
+}
+
+.sort-add select {
     width: 100%;
     padding: var(--space-sm) var(--space-md);
     border: 1px solid var(--border-color);
@@ -814,22 +877,6 @@ body {
     color: var(--text-primary);
     font-family: var(--font-body);
     font-size: 0.95rem;
-}
-
-.sort-direction {
-    display: flex;
-    gap: var(--space-sm);
-}
-
-.btn-dir {
-    flex: 1;
-    justify-content: center;
-    background: var(--bg-card);
-}
-
-.btn-dir.active {
-    background: var(--accent-primary);
-    border-color: var(--accent-primary);
 }
 
 /* Filter Groups */

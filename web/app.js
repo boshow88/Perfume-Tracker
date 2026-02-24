@@ -53,8 +53,8 @@ let filters = {
     value: { min: 0, max: 5, exclude: false }
 };
 
-let sortField = 'brand';
-let sortAscending = true;
+// Multi-level sort: array of {field, ascending}
+let sortDimensions = [];
 
 // Fragrantica vote categories - matches JSON structure and desktop app
 const VOTE_BLOCKS = [
@@ -133,8 +133,6 @@ function setupEventListeners() {
     document.getElementById('sort-btn').addEventListener('click', openSortModal);
     document.getElementById('sort-apply').addEventListener('click', applySortFromModal);
     document.getElementById('sort-clear').addEventListener('click', resetSort);
-    document.getElementById('sort-asc').addEventListener('click', () => setSortDirection(true));
-    document.getElementById('sort-desc').addEventListener('click', () => setSortDirection(false));
     
     // Filter modal
     document.getElementById('filter-btn').addEventListener('click', openFilterModal);
@@ -265,6 +263,45 @@ function checkScoreFilter(p, scoreType, filter, maxVal) {
     }
     
     return true;
+}
+
+function getSortValue(p, field) {
+    switch (field) {
+        case 'brand':
+            return (brandsMap[p.brand_id] || '').toLowerCase();
+        case 'name':
+            return (p.name || '').toLowerCase();
+        case 'concentration':
+            return (concentrationsMap[p.concentration_id] || '').toLowerCase();
+        case 'state':
+            return getStatePriority(p);
+        case 'rating':
+            return getPerfumeScore(p, 'rating_votes') || 0;
+        case 'longevity':
+            return getPerfumeScore(p, 'longevity_votes') || 0;
+        case 'sillage':
+            return getPerfumeScore(p, 'sillage_votes') || 0;
+        case 'value':
+            return getPerfumeScore(p, 'value_votes') || 0;
+        case 'created':
+            return p.created_at || '';
+        default:
+            return '';
+    }
+}
+
+function comparePerfumes(a, b, field, ascending) {
+    const valA = getSortValue(a, field);
+    const valB = getSortValue(b, field);
+    
+    let result;
+    if (typeof valA === 'number' && typeof valB === 'number') {
+        result = valA - valB;
+    } else {
+        result = String(valA).localeCompare(String(valB), 'zh-TW');
+    }
+    
+    return ascending ? result : -result;
 }
 
 function getStatePriority(p) {
@@ -777,56 +814,16 @@ function applyFiltersAndSort() {
         return true;
     });
     
-    filteredPerfumes.sort((a, b) => {
-        let valA, valB;
-        
-        switch (sortField) {
-            case 'brand':
-                valA = (brandsMap[a.brand_id] || '').toLowerCase();
-                valB = (brandsMap[b.brand_id] || '').toLowerCase();
-                break;
-            case 'name':
-                valA = (a.name || '').toLowerCase();
-                valB = (b.name || '').toLowerCase();
-                break;
-            case 'concentration':
-                valA = (concentrationsMap[a.concentration_id] || '').toLowerCase();
-                valB = (concentrationsMap[b.concentration_id] || '').toLowerCase();
-                break;
-            case 'state':
-                valA = getStatePriority(a);
-                valB = getStatePriority(b);
-                break;
-            case 'rating':
-                valA = getPerfumeScore(a, 'rating_votes') || 0;
-                valB = getPerfumeScore(b, 'rating_votes') || 0;
-                break;
-            case 'longevity':
-                valA = getPerfumeScore(a, 'longevity_votes') || 0;
-                valB = getPerfumeScore(b, 'longevity_votes') || 0;
-                break;
-            case 'sillage':
-                valA = getPerfumeScore(a, 'sillage_votes') || 0;
-                valB = getPerfumeScore(b, 'sillage_votes') || 0;
-                break;
-            case 'created':
-                valA = a.created_at || 0;
-                valB = b.created_at || 0;
-                break;
-            default:
-                valA = '';
-                valB = '';
-        }
-        
-        let result;
-        if (typeof valA === 'number') {
-            result = valA - valB;
-        } else {
-            result = valA.localeCompare(valB, 'zh-TW');
-        }
-        
-        return sortAscending ? result : -result;
-    });
+    // Multi-level sorting
+    if (sortDimensions.length > 0) {
+        filteredPerfumes.sort((a, b) => {
+            for (const dim of sortDimensions) {
+                const result = comparePerfumes(a, b, dim.field, dim.ascending);
+                if (result !== 0) return result;
+            }
+            return 0;
+        });
+    }
     
     renderPerfumeList();
     updateActiveFiltersDisplay();
@@ -842,44 +839,103 @@ function handleSearch() {
 // Sort Modal
 // ============================================
 
+const SORT_FIELD_LABELS = {
+    brand: 'Brand',
+    name: 'Name',
+    concentration: 'Concentration',
+    state: 'State',
+    rating: 'Rating',
+    longevity: 'Longevity',
+    sillage: 'Sillage',
+    value: 'Price Value',
+    created: 'Created'
+};
+
+// Temporary copy for editing in modal
+let tempSortDimensions = [];
+
 function openSortModal() {
     const modal = document.getElementById('sort-modal');
     modal.classList.remove('hidden');
     
-    // Set current values
-    document.getElementById('sort-field').value = sortField;
-    updateSortDirectionButtons();
+    // Copy current dimensions for editing
+    tempSortDimensions = sortDimensions.map(d => ({...d}));
+    renderSortDimensions();
+    updateSortAddOptions();
+    
+    // Setup add field listener
+    const addSelect = document.getElementById('sort-add-field');
+    addSelect.onchange = () => {
+        if (addSelect.value) {
+            addSortDimension(addSelect.value);
+            addSelect.value = '';
+        }
+    };
 }
 
-function closeSortModal() {
-    document.getElementById('sort-modal').classList.add('hidden');
+function renderSortDimensions() {
+    const container = document.getElementById('sort-dimensions');
+    
+    if (tempSortDimensions.length === 0) {
+        container.innerHTML = '<p class="sort-empty">No sorting applied</p>';
+        return;
+    }
+    
+    container.innerHTML = tempSortDimensions.map((dim, index) => `
+        <div class="sort-dimension-item" data-index="${index}">
+            <span class="sort-dimension-num">${index + 1}.</span>
+            <span class="sort-dimension-name">${SORT_FIELD_LABELS[dim.field] || dim.field}</span>
+            <div class="sort-dimension-dir">
+                <button class="asc-btn ${dim.ascending ? 'active' : ''}" onclick="toggleSortDirection(${index}, true)">▲</button>
+                <button class="desc-btn ${!dim.ascending ? 'active' : ''}" onclick="toggleSortDirection(${index}, false)">▼</button>
+            </div>
+            <button class="sort-dimension-remove" onclick="removeSortDimension(${index})">✕</button>
+        </div>
+    `).join('');
+}
+
+function addSortDimension(field) {
+    // Don't add if already exists
+    if (tempSortDimensions.some(d => d.field === field)) return;
+    
+    tempSortDimensions.push({ field, ascending: true });
+    renderSortDimensions();
+    updateSortAddOptions();
+}
+
+function removeSortDimension(index) {
+    tempSortDimensions.splice(index, 1);
+    renderSortDimensions();
+    updateSortAddOptions();
+}
+
+function toggleSortDirection(index, ascending) {
+    tempSortDimensions[index].ascending = ascending;
+    renderSortDimensions();
+}
+
+function updateSortAddOptions() {
+    const addSelect = document.getElementById('sort-add-field');
+    const usedFields = new Set(tempSortDimensions.map(d => d.field));
+    
+    Array.from(addSelect.options).forEach(opt => {
+        if (opt.value) {
+            opt.disabled = usedFields.has(opt.value);
+        }
+    });
 }
 
 function applySortFromModal() {
-    sortField = document.getElementById('sort-field').value;
-    closeSortModal();
+    sortDimensions = tempSortDimensions.map(d => ({...d}));
+    closeAllModals();
     applyFiltersAndSort();
     updateSortButtonState();
 }
 
 function resetSort() {
-    sortField = 'brand';
-    sortAscending = true;
-    document.getElementById('sort-field').value = 'brand';
-    updateSortDirectionButtons();
-    closeSortModal();
-    applyFiltersAndSort();
-    updateSortButtonState();
-}
-
-function setSortDirection(ascending) {
-    sortAscending = ascending;
-    updateSortDirectionButtons();
-}
-
-function updateSortDirectionButtons() {
-    document.getElementById('sort-asc').classList.toggle('active', sortAscending);
-    document.getElementById('sort-desc').classList.toggle('active', !sortAscending);
+    tempSortDimensions = [];
+    renderSortDimensions();
+    updateSortAddOptions();
 }
 
 function closeAllModals() {
@@ -889,8 +945,7 @@ function closeAllModals() {
 
 function updateSortButtonState() {
     const btn = document.getElementById('sort-btn');
-    const isNonDefault = sortField !== 'brand' || !sortAscending;
-    btn.classList.toggle('active', isNonDefault);
+    btn.classList.toggle('active', sortDimensions.length > 0);
 }
 
 // ============================================
