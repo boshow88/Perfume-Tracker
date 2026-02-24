@@ -245,6 +245,73 @@
                             </div>
                         </div>
                     </div>
+                    <!-- Season/Time Filter -->
+                    <div class="filter-group">
+                        <label>When to Wear</label>
+                        <div class="when-filters">
+                            <div class="when-row">
+                                <span class="when-label">Season:</span>
+                                <div class="checkbox-group" id="filter-season">
+                                    <label class="checkbox-item">
+                                        <input type="checkbox" value="spring"> Spring
+                                    </label>
+                                    <label class="checkbox-item">
+                                        <input type="checkbox" value="summer"> Summer
+                                    </label>
+                                    <label class="checkbox-item">
+                                        <input type="checkbox" value="fall"> Fall
+                                    </label>
+                                    <label class="checkbox-item">
+                                        <input type="checkbox" value="winter"> Winter
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="when-row">
+                                <span class="when-label">Time:</span>
+                                <div class="checkbox-group" id="filter-time">
+                                    <label class="checkbox-item">
+                                        <input type="checkbox" value="day"> Day
+                                    </label>
+                                    <label class="checkbox-item">
+                                        <input type="checkbox" value="night"> Night
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- Gender Filter -->
+                    <div class="filter-group">
+                        <label>Gender</label>
+                        <div class="checkbox-group" id="filter-gender">
+                            <label class="checkbox-item">
+                                <input type="checkbox" value="male"> Male
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" value="more_male"> More Male
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" value="unisex"> Unisex
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" value="more_female"> More Female
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" value="female"> Female
+                            </label>
+                        </div>
+                    </div>
+                    <!-- Vote Status Filter -->
+                    <div class="filter-group">
+                        <label>Vote Status</label>
+                        <div class="checkbox-group" id="filter-vote-status">
+                            <label class="checkbox-item">
+                                <input type="checkbox" value="has_my_vote"> Has My Votes
+                            </label>
+                            <label class="checkbox-item">
+                                <input type="checkbox" value="has_fragrantica"> Has Fragrantica Data
+                            </label>
+                        </div>
+                    </div>
                     <!-- Brand Filter -->
                     <div class="filter-group">
                         <label>Brand</label>
@@ -264,6 +331,14 @@
                     <div class="filter-group">
                         <label>Tags</label>
                         <select id="filter-tag" multiple></select>
+                        <div class="tags-logic">
+                            <label class="radio-item">
+                                <input type="radio" name="tags-logic" value="or" checked> Match Any (OR)
+                            </label>
+                            <label class="radio-item">
+                                <input type="radio" name="tags-logic" value="and"> Match All (AND)
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">

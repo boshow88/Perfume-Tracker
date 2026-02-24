@@ -36,10 +36,16 @@ let purchaseTypesMap = {};
 
 let filters = {
     states: [],
+    seasons: [],
+    times: [],
+    genders: [],
+    hasMyVote: false,
+    hasFragrantica: false,
     brands: [],
     concentrations: [],
     locations: [],
     tags: [],
+    tagsLogic: 'or', // 'or' or 'and'
     // Score ranges: { min, max, exclude }
     rating: { min: 0, max: 5, exclude: false },
     longevity: { min: 0, max: 5, exclude: false },
@@ -698,6 +704,50 @@ function applyFiltersAndSort() {
         if (!checkScoreFilter(p, 'sillage', filters.sillage, 4)) return false;
         if (!checkScoreFilter(p, 'value', filters.value, 5)) return false;
         
+        // Season/Time filter
+        if (filters.seasons.length > 0 || filters.times.length > 0) {
+            const checkItems = [...filters.seasons, ...filters.times];
+            const frVotes = (p.fragrantica || {}).season_time_votes || {};
+            const myVotes = ((p.my_votes || {}).my_season_time_votes) || {};
+            
+            const matchesWhen = checkItems.some(item => {
+                const frVal = parseInt(frVotes[item] || 0);
+                const myVal = parseInt(myVotes[item] || 0);
+                return frVal >= 10 || myVal > 0;
+            });
+            if (!matchesWhen) return false;
+        }
+        
+        // Gender filter
+        if (filters.genders.length > 0) {
+            const frVotes = (p.fragrantica || {}).gender_votes || {};
+            const myVotes = ((p.my_votes || {}).my_gender_votes) || {};
+            
+            const matchesGender = filters.genders.some(gender => {
+                const frVal = parseInt(frVotes[gender] || 0);
+                const myVal = parseInt(myVotes[gender] || 0);
+                return frVal >= 10 || myVal > 0;
+            });
+            if (!matchesGender) return false;
+        }
+        
+        // Vote status filters
+        if (filters.hasMyVote) {
+            const myVotes = p.my_votes || {};
+            const hasAnyVote = Object.values(myVotes).some(votes => 
+                votes && Object.values(votes).some(v => v > 0)
+            );
+            if (!hasAnyVote) return false;
+        }
+        
+        if (filters.hasFragrantica) {
+            const fragrantica = p.fragrantica || {};
+            const hasAnyData = Object.values(fragrantica).some(votes => 
+                votes && Object.values(votes).some(v => v > 0)
+            );
+            if (!hasAnyData) return false;
+        }
+        
         if (filters.brands.length > 0 && !filters.brands.includes(p.brand_id)) {
             return false;
         }
@@ -712,8 +762,16 @@ function applyFiltersAndSort() {
         }
         
         if (filters.tags.length > 0) {
-            const hasTag = (p.tag_ids || []).some(id => filters.tags.includes(id));
-            if (!hasTag) return false;
+            const pTagIds = new Set(p.tag_ids || []);
+            if (filters.tagsLogic === 'and') {
+                // AND: all selected tags must be present
+                const hasAllTags = filters.tags.every(id => pTagIds.has(id));
+                if (!hasAllTags) return false;
+            } else {
+                // OR: at least one selected tag must be present
+                const hasAnyTag = filters.tags.some(id => pTagIds.has(id));
+                if (!hasAnyTag) return false;
+            }
         }
         
         return true;
@@ -928,6 +986,28 @@ function openFilterModal() {
         cb.checked = filters.states.includes(cb.value);
     });
     
+    // Restore season checkboxes
+    document.querySelectorAll('#filter-season input').forEach(cb => {
+        cb.checked = filters.seasons.includes(cb.value);
+    });
+    
+    // Restore time checkboxes
+    document.querySelectorAll('#filter-time input').forEach(cb => {
+        cb.checked = filters.times.includes(cb.value);
+    });
+    
+    // Restore gender checkboxes
+    document.querySelectorAll('#filter-gender input').forEach(cb => {
+        cb.checked = filters.genders.includes(cb.value);
+    });
+    
+    // Restore vote status checkboxes
+    const voteStatusInputs = document.querySelectorAll('#filter-vote-status input');
+    voteStatusInputs.forEach(cb => {
+        if (cb.value === 'has_my_vote') cb.checked = filters.hasMyVote;
+        if (cb.value === 'has_fragrantica') cb.checked = filters.hasFragrantica;
+    });
+    
     // Restore score range sliders
     document.querySelectorAll('.score-filter-item').forEach(item => {
         const scoreType = item.dataset.score;
@@ -960,12 +1040,35 @@ function openFilterModal() {
     setSelectValues('filter-concentration', filters.concentrations);
     setSelectValues('filter-location', filters.locations);
     setSelectValues('filter-tag', filters.tags);
+    
+    // Restore tags logic
+    document.querySelectorAll('input[name="tags-logic"]').forEach(radio => {
+        radio.checked = (radio.value === filters.tagsLogic);
+    });
 }
 
 function applyFilters() {
     // Get state checkboxes
     filters.states = Array.from(document.querySelectorAll('#filter-state input:checked'))
         .map(cb => cb.value);
+    
+    // Get season checkboxes
+    filters.seasons = Array.from(document.querySelectorAll('#filter-season input:checked'))
+        .map(cb => cb.value);
+    
+    // Get time checkboxes
+    filters.times = Array.from(document.querySelectorAll('#filter-time input:checked'))
+        .map(cb => cb.value);
+    
+    // Get gender checkboxes
+    filters.genders = Array.from(document.querySelectorAll('#filter-gender input:checked'))
+        .map(cb => cb.value);
+    
+    // Get vote status
+    const voteStatusChecked = Array.from(document.querySelectorAll('#filter-vote-status input:checked'))
+        .map(cb => cb.value);
+    filters.hasMyVote = voteStatusChecked.includes('has_my_vote');
+    filters.hasFragrantica = voteStatusChecked.includes('has_fragrantica');
     
     // Get score range values
     document.querySelectorAll('.score-filter-item').forEach(item => {
@@ -982,6 +1085,10 @@ function applyFilters() {
     filters.locations = getSelectValues('filter-location');
     filters.tags = getSelectValues('filter-tag');
     
+    // Get tags logic
+    const selectedLogic = document.querySelector('input[name="tags-logic"]:checked');
+    filters.tagsLogic = selectedLogic ? selectedLogic.value : 'or';
+    
     closeAllModals();
     applyFiltersAndSort();
 }
@@ -989,10 +1096,16 @@ function applyFilters() {
 function clearFilters() {
     filters = {
         states: [],
+        seasons: [],
+        times: [],
+        genders: [],
+        hasMyVote: false,
+        hasFragrantica: false,
         brands: [],
         concentrations: [],
         locations: [],
         tags: [],
+        tagsLogic: 'or',
         rating: { min: 0, max: 5, exclude: false },
         longevity: { min: 0, max: 5, exclude: false },
         sillage: { min: 0, max: 4, exclude: false },
@@ -1001,6 +1114,10 @@ function clearFilters() {
     
     // Clear state checkboxes
     document.querySelectorAll('#filter-state input').forEach(cb => cb.checked = false);
+    
+    // Clear season/time/gender/vote-status checkboxes
+    document.querySelectorAll('#filter-season input, #filter-time input, #filter-gender input, #filter-vote-status input')
+        .forEach(cb => cb.checked = false);
     
     // Reset score range sliders
     document.querySelectorAll('.score-filter-item').forEach(item => {
@@ -1019,6 +1136,11 @@ function clearFilters() {
     ['filter-brand', 'filter-concentration', 'filter-location', 'filter-tag'].forEach(id => {
         const select = document.getElementById(id);
         Array.from(select.options).forEach(opt => opt.selected = false);
+    });
+    
+    // Reset tags logic to OR
+    document.querySelectorAll('input[name="tags-logic"]').forEach(radio => {
+        radio.checked = (radio.value === 'or');
     });
     
     closeAllModals();
@@ -1076,6 +1198,11 @@ function updateFilterButtonState() {
     );
     
     const hasFilters = filters.states.length > 0 ||
+                       filters.seasons.length > 0 ||
+                       filters.times.length > 0 ||
+                       filters.genders.length > 0 ||
+                       filters.hasMyVote ||
+                       filters.hasFragrantica ||
                        filters.brands.length > 0 || 
                        filters.concentrations.length > 0 || 
                        filters.locations.length > 0 || 

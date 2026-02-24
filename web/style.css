@@ -990,6 +990,45 @@ body {
     color: var(--text-muted);
 }
 
+/* When to Wear Filters */
+.when-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+}
+
+.when-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+}
+
+.when-label {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    min-width: 55px;
+}
+
+/* Tags Logic */
+.tags-logic {
+    display: flex;
+    gap: var(--space-md);
+    margin-top: var(--space-sm);
+}
+
+.radio-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.radio-item input {
+    cursor: pointer;
+}
+
 .filter-group:last-child {
     margin-bottom: 0;
 }
