@@ -627,7 +627,7 @@ def derive_state(p: Perfume, tag_names: List[str] = None, included_purchase_type
       - tested? if any smell/skin exists
       - on_skin? if any skin exists
       - owned_ml = sum(ml_delta for events whose purchase_type is in included_purchase_types)
-      - want_to_buy? if tag has "want" or note includes "want" (prototype heuristic)
+      - want? if any event has event_type == "want"
     
     included_purchase_types: if provided, only events with this purchase_type name count toward owned_ml.
     """
@@ -640,9 +640,15 @@ def derive_state(p: Perfume, tag_names: List[str] = None, included_purchase_type
             if included is None or (e.purchase_type or "").strip() in included:
                 owned_ml += float(e.ml_delta)
 
-    # V2: Use tag_names parameter (required for want detection)
-    tags_to_check = tag_names if tag_names is not None else []
-    want = ("want" in [t.lower() for t in tags_to_check]) or any(("want" in (e.note or "").lower()) for e in p.events)
+    # Check most recent want/unwant event to determine current want status
+    want = False
+    latest_want_ts = None
+    for e in p.events:
+        if e.event_type in ("want", "unwant"):
+            ts = e.timestamp or ""
+            if latest_want_ts is None or ts > latest_want_ts:
+                latest_want_ts = ts
+                want = (e.event_type == "want")
 
     parts = []
     if tested:
@@ -1587,6 +1593,9 @@ class EditEventsDialog(tk.Toplevel):
                    command=lambda: self._add_transaction("buy")).pack(side="left", padx=2)
         ttk.Button(btn_frame, text="Sell", width=8,
                    command=lambda: self._add_transaction("sell")).pack(side="left", padx=2)
+        self.want_btn = ttk.Button(btn_frame, text="Want", width=8,
+                   command=self._toggle_want)
+        self.want_btn.pack(side="left", padx=2)
         
         # Events list
         list_frame = ttk.Frame(self, style="TFrame")
@@ -1655,6 +1664,8 @@ class EditEventsDialog(tk.Toplevel):
             "skin": "Skin",
             "buy": "Buy",
             "sell": "Sell",
+            "want": "Want",
+            "unwant": "Unwant",
         }
         
         for e in sorted_events:
@@ -1684,6 +1695,9 @@ class EditEventsDialog(tk.Toplevel):
             detail_str = " ".join(details)
             
             self.tree.insert("", "end", iid=e.id, values=(date_str, action_label, detail_str, e.note or ""))
+        
+        # Update want button text based on current state
+        self._update_want_button()
     
     def _add_smell(self, event_type: str, edit_event: Event = None):
         """Open dialog to add/edit smell or skin event"""
@@ -1754,6 +1768,99 @@ class EditEventsDialog(tk.Toplevel):
         ttk.Button(btn_frame, text="Save" if is_edit else "Add", command=do_save).pack(side="right", padx=(0, 8))
         
         loc_cb.focus_set()
+    
+    def _is_currently_wanted(self) -> bool:
+        """Check if perfume is currently wanted based on most recent want/unwant event"""
+        latest_ts = None
+        is_wanted = False
+        for e in self.perfume.events:
+            if e.event_type in ("want", "unwant"):
+                ts = e.timestamp or ""
+                if latest_ts is None or ts > latest_ts:
+                    latest_ts = ts
+                    is_wanted = (e.event_type == "want")
+        return is_wanted
+    
+    def _update_want_button(self):
+        """Update want button text based on current state"""
+        if self._is_currently_wanted():
+            self.want_btn.config(text="Unwant")
+        else:
+            self.want_btn.config(text="Want")
+    
+    def _toggle_want(self):
+        """Toggle want status - add want or unwant event"""
+        if self._is_currently_wanted():
+            event_type = "unwant"
+            title = "Remove from Wishlist"
+        else:
+            event_type = "want"
+            title = "Add to Wishlist"
+        self._add_want_event(event_type, title)
+    
+    def _add_want_event(self, event_type: str, title: str, edit_event: Event = None):
+        """Open dialog to add/edit want or unwant event"""
+        is_edit = edit_event is not None
+        
+        win = tk.Toplevel(self)
+        win.title(f"Edit {event_type.capitalize()}" if is_edit else title)
+        win.configure(bg=COLORS["bg"])
+        win.transient(self)
+        win.grab_set()
+        win.geometry("360x180")
+        
+        main_frame = ttk.Frame(win, style="TFrame")
+        main_frame.pack(fill="both", expand=True, padx=15, pady=10)
+        
+        # Date
+        date_frame = ttk.Frame(main_frame, style="TFrame")
+        date_frame.pack(fill="x", pady=3)
+        ttk.Label(date_frame, text="Date:", width=10).pack(side="left")
+        var_date = tk.StringVar(value=edit_event.event_date if is_edit and edit_event.event_date else "")
+        date_entry = ttk.Entry(date_frame, textvariable=var_date, width=15)
+        date_entry.pack(side="left", padx=(0, 5))
+        ttk.Label(date_frame, text="(YYYY-MM-DD)", foreground="#888").pack(side="left")
+        
+        # Note
+        note_frame = ttk.Frame(main_frame, style="TFrame")
+        note_frame.pack(fill="x", pady=3)
+        ttk.Label(note_frame, text="Note:", width=10).pack(side="left")
+        var_note = tk.StringVar(value=edit_event.note if is_edit and edit_event.note else "")
+        note_entry = ttk.Entry(note_frame, textvariable=var_note, width=35)
+        note_entry.pack(side="left", fill="x", expand=True)
+        
+        # Buttons
+        btn_frame = ttk.Frame(main_frame, style="TFrame")
+        btn_frame.pack(fill="x", pady=(15, 0))
+        
+        def do_save():
+            date_val = var_date.get().strip()
+            note_val = var_note.get().strip()
+            
+            if is_edit:
+                edit_event.event_date = date_val if date_val else None
+                edit_event.note = note_val if note_val else None
+                self.app.save()
+            else:
+                e = Event(
+                    id=new_id(),
+                    perfume_id=self.perfume.id,
+                    event_type=event_type,
+                    timestamp=now_ts(),
+                    event_date=date_val if date_val else None,
+                    note=note_val if note_val else None
+                )
+                self.perfume.events.append(e)
+                self.app.save()
+            
+            self._refresh_list()
+            self.app._on_select()
+            win.destroy()
+        
+        ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side="right")
+        ttk.Button(btn_frame, text="Save" if is_edit else "Add", command=do_save).pack(side="right", padx=(0, 8))
+        
+        note_entry.focus_set()
     
     def _add_transaction(self, event_type: str, edit_event: Event = None):
         """Open dialog to add/edit buy/sell type event"""
@@ -1894,6 +2001,9 @@ class EditEventsDialog(tk.Toplevel):
             self._add_smell(event.event_type, edit_event=event)
         elif event.event_type in ("buy", "sell"):
             self._add_transaction(event.event_type, edit_event=event)
+        elif event.event_type in ("want", "unwant"):
+            title = "Edit Want" if event.event_type == "want" else "Edit Unwant"
+            self._add_want_event(event.event_type, title, edit_event=event)
         else:
             messagebox.showinfo("Info", f"Unknown event type: {event.event_type}")
     

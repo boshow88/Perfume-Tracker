@@ -35,6 +35,7 @@ let noteTitlesMap = {};
 let purchaseTypesMap = {};
 
 let filters = {
+    states: [],
     brands: [],
     concentrations: [],
     locations: [],
@@ -358,6 +359,10 @@ function deriveState(p) {
     let hasSmelled = false;
     let hasOnSkin = false;
     
+    // Check most recent want/unwant event to determine current want status
+    let hasWant = false;
+    let latestWantTs = null;
+    
     for (const e of events) {
         if (e.event_type === 'smell') {
             hasSmelled = true;
@@ -365,15 +370,17 @@ function deriveState(p) {
         if (e.event_type === 'skin') {
             hasOnSkin = true;
         }
+        if (e.event_type === 'want' || e.event_type === 'unwant') {
+            const ts = e.timestamp || '';
+            if (latestWantTs === null || ts > latestWantTs) {
+                latestWantTs = ts;
+                hasWant = (e.event_type === 'want');
+            }
+        }
         if (e.ml_delta !== null && e.ml_delta !== undefined) {
             ownedMl += e.ml_delta;
         }
     }
-    
-    // Check for "want" in tags or event notes
-    const tagNames = (p.tag_ids || []).map(id => (tagsMap[id] || '').toLowerCase());
-    const hasWant = tagNames.some(t => t.includes('want')) || 
-                    events.some(e => (e.note || '').toLowerCase().includes('want'));
     
     const parts = [];
     if (hasSmelled) parts.push('Smelled');
@@ -534,9 +541,18 @@ function renderEvents(p) {
         return;
     }
     
+    const typeLabels = {
+        smell: 'Smell',
+        skin: 'Skin',
+        buy: 'Buy',
+        sell: 'Sell',
+        want: 'Want',
+        unwant: 'Unwant'
+    };
+    
     section.classList.remove('hidden');
     content.innerHTML = events.map(e => {
-        const eventType = e.event_type || 'event';
+        const eventType = typeLabels[e.event_type] || e.event_type || 'Event';
         const purchaseType = e.purchase_type || purchaseTypesMap[e.purchase_type_id] || '';
         const date = e.event_date || e.timestamp?.split('T')[0] || '';
         const location = e.location || '';
@@ -623,6 +639,20 @@ function applyFiltersAndSort() {
             if (!searchable.includes(searchTerm)) {
                 return false;
             }
+        }
+        
+        // State filter
+        if (filters.states.length > 0) {
+            const state = deriveState(p).toLowerCase();
+            const matchesState = filters.states.some(s => {
+                if (s === 'owned') return state.includes('owned');
+                if (s === 'smelled') return state.includes('smelled');
+                if (s === 'on-skin') return state.includes('on-skin');
+                if (s === 'want') return state.includes('want');
+                if (s === 'new') return state === 'new';
+                return false;
+            });
+            if (!matchesState) return false;
         }
         
         if (filters.brands.length > 0 && !filters.brands.includes(p.brand_id)) {
@@ -795,6 +825,11 @@ function openFilterModal() {
     const modal = document.getElementById('filter-modal');
     modal.classList.remove('hidden');
     
+    // Restore state checkboxes
+    document.querySelectorAll('#filter-state input').forEach(cb => {
+        cb.checked = filters.states.includes(cb.value);
+    });
+    
     setSelectValues('filter-brand', filters.brands);
     setSelectValues('filter-concentration', filters.concentrations);
     setSelectValues('filter-location', filters.locations);
@@ -802,6 +837,10 @@ function openFilterModal() {
 }
 
 function applyFilters() {
+    // Get state checkboxes
+    filters.states = Array.from(document.querySelectorAll('#filter-state input:checked'))
+        .map(cb => cb.value);
+    
     filters.brands = getSelectValues('filter-brand');
     filters.concentrations = getSelectValues('filter-concentration');
     filters.locations = getSelectValues('filter-location');
@@ -812,8 +851,12 @@ function applyFilters() {
 }
 
 function clearFilters() {
-    filters = { brands: [], concentrations: [], locations: [], tags: [] };
+    filters = { states: [], brands: [], concentrations: [], locations: [], tags: [] };
     
+    // Clear state checkboxes
+    document.querySelectorAll('#filter-state input').forEach(cb => cb.checked = false);
+    
+    // Clear select boxes
     ['filter-brand', 'filter-concentration', 'filter-location', 'filter-tag'].forEach(id => {
         const select = document.getElementById(id);
         Array.from(select.options).forEach(opt => opt.selected = false);
@@ -864,7 +907,8 @@ function removeFilter(type, id) {
 
 function updateFilterButtonState() {
     const btn = document.getElementById('filter-btn');
-    const hasFilters = filters.brands.length > 0 || 
+    const hasFilters = filters.states.length > 0 ||
+                       filters.brands.length > 0 || 
                        filters.concentrations.length > 0 || 
                        filters.locations.length > 0 || 
                        filters.tags.length > 0;
