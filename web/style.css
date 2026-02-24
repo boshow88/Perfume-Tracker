@@ -870,6 +870,126 @@ body {
     cursor: pointer;
 }
 
+/* Score Filter Styles */
+.score-filters {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-md);
+}
+
+.score-filter-item {
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: var(--space-sm);
+}
+
+.score-filter-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: var(--space-xs);
+}
+
+.score-label {
+    font-weight: 500;
+    font-size: 0.9rem;
+}
+
+.exclude-toggle {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.exclude-toggle input {
+    cursor: pointer;
+}
+
+/* Dual Range Slider */
+.range-slider-container {
+    position: relative;
+    height: 20px;
+    margin: var(--space-xs) 0;
+}
+
+.range-slider-container input[type="range"] {
+    position: absolute;
+    width: 100%;
+    height: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: transparent;
+    pointer-events: none;
+    -webkit-appearance: none;
+    appearance: none;
+    z-index: 2;
+}
+
+.range-slider-container input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    cursor: pointer;
+    pointer-events: auto;
+    border: 2px solid var(--bg-main);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.range-slider-container input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    cursor: pointer;
+    pointer-events: auto;
+    border: 2px solid var(--bg-main);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+}
+
+.range-track {
+    position: absolute;
+    width: 100%;
+    height: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--border-color);
+    border-radius: 3px;
+    z-index: 1;
+}
+
+.range-selected {
+    position: absolute;
+    height: 5px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: var(--accent-primary);
+    border-radius: 3px;
+    z-index: 1;
+}
+
+.range-values {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.score-filter-item.excluded .range-selected {
+    background: var(--text-muted);
+}
+
+.score-filter-item.excluded .score-label {
+    text-decoration: line-through;
+    color: var(--text-muted);
+}
+
 .filter-group:last-child {
     margin-bottom: 0;
 }

@@ -39,7 +39,12 @@ let filters = {
     brands: [],
     concentrations: [],
     locations: [],
-    tags: []
+    tags: [],
+    // Score ranges: { min, max, exclude }
+    rating: { min: 0, max: 5, exclude: false },
+    longevity: { min: 0, max: 5, exclude: false },
+    sillage: { min: 0, max: 4, exclude: false },
+    value: { min: 0, max: 5, exclude: false }
 };
 
 let sortField = 'brand';
@@ -129,6 +134,9 @@ function setupEventListeners() {
     document.getElementById('filter-btn').addEventListener('click', openFilterModal);
     document.getElementById('filter-apply').addEventListener('click', applyFilters);
     document.getElementById('filter-clear').addEventListener('click', clearFilters);
+    
+    // Score range sliders
+    initScoreRangeSliders();
     
     // Modal close buttons
     document.querySelectorAll('.modal-close').forEach(btn => {
@@ -222,6 +230,35 @@ function getPerfumeScore(p, voteKey) {
     const block = VOTE_BLOCKS.find(b => b.key === voteKey);
     if (!block || !p.fragrantica) return null;
     return calculateScore(p.fragrantica[voteKey], block);
+}
+
+function checkScoreFilter(p, scoreType, filter, maxVal) {
+    // If filter is at default values (full range, not exclude), skip check
+    if (filter.min === 0 && filter.max === maxVal && !filter.exclude) {
+        return true;
+    }
+    
+    // Map scoreType to vote key
+    const voteKeyMap = {
+        rating: 'rating_votes',
+        longevity: 'longevity_votes',
+        sillage: 'sillage_votes',
+        value: 'value_votes'
+    };
+    
+    const score = getPerfumeScore(p, voteKeyMap[scoreType]);
+    const hasData = score !== null && score > 0;
+    const inRange = score !== null && score >= filter.min && score <= filter.max;
+    
+    if (filter.exclude) {
+        // Exclude mode: reject if has data and in range
+        if (hasData && inRange) return false;
+    } else {
+        // Include mode: reject if no data or not in range
+        if (!hasData || !inRange) return false;
+    }
+    
+    return true;
 }
 
 function getStatePriority(p) {
@@ -655,6 +692,12 @@ function applyFiltersAndSort() {
             if (!matchesState) return false;
         }
         
+        // Score filters
+        if (!checkScoreFilter(p, 'rating', filters.rating, 5)) return false;
+        if (!checkScoreFilter(p, 'longevity', filters.longevity, 5)) return false;
+        if (!checkScoreFilter(p, 'sillage', filters.sillage, 4)) return false;
+        if (!checkScoreFilter(p, 'value', filters.value, 5)) return false;
+        
         if (filters.brands.length > 0 && !filters.brands.includes(p.brand_id)) {
             return false;
         }
@@ -821,6 +864,61 @@ function populateFilterOptions() {
         .join('');
 }
 
+function initScoreRangeSliders() {
+    document.querySelectorAll('.score-filter-item').forEach(item => {
+        const scoreType = item.dataset.score;
+        const maxVal = parseFloat(item.dataset.max);
+        const minInput = item.querySelector('.range-min');
+        const maxInput = item.querySelector('.range-max');
+        const excludeCheckbox = item.querySelector('.score-exclude');
+        const selectedBar = item.querySelector('.range-selected');
+        const minDisplay = item.querySelector('.range-value-min');
+        const maxDisplay = item.querySelector('.range-value-max');
+        
+        function updateSlider() {
+            const minVal = parseFloat(minInput.value);
+            const maxValCurrent = parseFloat(maxInput.value);
+            
+            // Ensure min doesn't exceed max
+            if (minVal > maxValCurrent) {
+                minInput.value = maxValCurrent;
+            }
+            if (maxValCurrent < minVal) {
+                maxInput.value = minVal;
+            }
+            
+            const min = parseFloat(minInput.value);
+            const max = parseFloat(maxInput.value);
+            
+            // Update display
+            minDisplay.textContent = min.toFixed(1);
+            maxDisplay.textContent = max.toFixed(1);
+            
+            // Update selected bar position
+            const leftPercent = (min / maxVal) * 100;
+            const rightPercent = (max / maxVal) * 100;
+            selectedBar.style.left = leftPercent + '%';
+            selectedBar.style.width = (rightPercent - leftPercent) + '%';
+        }
+        
+        function updateExcludeStyle() {
+            if (excludeCheckbox.checked) {
+                item.classList.add('excluded');
+            } else {
+                item.classList.remove('excluded');
+            }
+        }
+        
+        minInput.addEventListener('input', updateSlider);
+        maxInput.addEventListener('input', updateSlider);
+        excludeCheckbox.addEventListener('change', updateExcludeStyle);
+        
+        // Initialize
+        updateSlider();
+        updateExcludeStyle();
+    });
+}
+
 function openFilterModal() {
     const modal = document.getElementById('filter-modal');
     modal.classList.remove('hidden');
@@ -828,6 +926,34 @@ function openFilterModal() {
     // Restore state checkboxes
     document.querySelectorAll('#filter-state input').forEach(cb => {
         cb.checked = filters.states.includes(cb.value);
+    });
+    
+    // Restore score range sliders
+    document.querySelectorAll('.score-filter-item').forEach(item => {
+        const scoreType = item.dataset.score;
+        const scoreFilter = filters[scoreType];
+        if (scoreFilter) {
+            item.querySelector('.range-min').value = scoreFilter.min;
+            item.querySelector('.range-max').value = scoreFilter.max;
+            item.querySelector('.score-exclude').checked = scoreFilter.exclude;
+            
+            // Update visuals
+            const maxVal = parseFloat(item.dataset.max);
+            const selectedBar = item.querySelector('.range-selected');
+            const leftPercent = (scoreFilter.min / maxVal) * 100;
+            const rightPercent = (scoreFilter.max / maxVal) * 100;
+            selectedBar.style.left = leftPercent + '%';
+            selectedBar.style.width = (rightPercent - leftPercent) + '%';
+            
+            item.querySelector('.range-value-min').textContent = scoreFilter.min.toFixed(1);
+            item.querySelector('.range-value-max').textContent = scoreFilter.max.toFixed(1);
+            
+            if (scoreFilter.exclude) {
+                item.classList.add('excluded');
+            } else {
+                item.classList.remove('excluded');
+            }
+        }
     });
     
     setSelectValues('filter-brand', filters.brands);
@@ -841,6 +967,16 @@ function applyFilters() {
     filters.states = Array.from(document.querySelectorAll('#filter-state input:checked'))
         .map(cb => cb.value);
     
+    // Get score range values
+    document.querySelectorAll('.score-filter-item').forEach(item => {
+        const scoreType = item.dataset.score;
+        filters[scoreType] = {
+            min: parseFloat(item.querySelector('.range-min').value),
+            max: parseFloat(item.querySelector('.range-max').value),
+            exclude: item.querySelector('.score-exclude').checked
+        };
+    });
+    
     filters.brands = getSelectValues('filter-brand');
     filters.concentrations = getSelectValues('filter-concentration');
     filters.locations = getSelectValues('filter-location');
@@ -851,10 +987,33 @@ function applyFilters() {
 }
 
 function clearFilters() {
-    filters = { states: [], brands: [], concentrations: [], locations: [], tags: [] };
+    filters = {
+        states: [],
+        brands: [],
+        concentrations: [],
+        locations: [],
+        tags: [],
+        rating: { min: 0, max: 5, exclude: false },
+        longevity: { min: 0, max: 5, exclude: false },
+        sillage: { min: 0, max: 4, exclude: false },
+        value: { min: 0, max: 5, exclude: false }
+    };
     
     // Clear state checkboxes
     document.querySelectorAll('#filter-state input').forEach(cb => cb.checked = false);
+    
+    // Reset score range sliders
+    document.querySelectorAll('.score-filter-item').forEach(item => {
+        const maxVal = parseFloat(item.dataset.max);
+        item.querySelector('.range-min').value = 0;
+        item.querySelector('.range-max').value = maxVal;
+        item.querySelector('.score-exclude').checked = false;
+        item.querySelector('.range-value-min').textContent = '0.0';
+        item.querySelector('.range-value-max').textContent = maxVal.toFixed(1);
+        item.querySelector('.range-selected').style.left = '0%';
+        item.querySelector('.range-selected').style.width = '100%';
+        item.classList.remove('excluded');
+    });
     
     // Clear select boxes
     ['filter-brand', 'filter-concentration', 'filter-location', 'filter-tag'].forEach(id => {
@@ -907,11 +1066,21 @@ function removeFilter(type, id) {
 
 function updateFilterButtonState() {
     const btn = document.getElementById('filter-btn');
+    
+    // Check if any score filter is active
+    const hasScoreFilter = (
+        filters.rating.min > 0 || filters.rating.max < 5 || filters.rating.exclude ||
+        filters.longevity.min > 0 || filters.longevity.max < 5 || filters.longevity.exclude ||
+        filters.sillage.min > 0 || filters.sillage.max < 4 || filters.sillage.exclude ||
+        filters.value.min > 0 || filters.value.max < 5 || filters.value.exclude
+    );
+    
     const hasFilters = filters.states.length > 0 ||
                        filters.brands.length > 0 || 
                        filters.concentrations.length > 0 || 
                        filters.locations.length > 0 || 
-                       filters.tags.length > 0;
+                       filters.tags.length > 0 ||
+                       hasScoreFilter;
     btn.classList.toggle('active', hasFilters);
 }
 
