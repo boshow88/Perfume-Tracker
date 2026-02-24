@@ -7,6 +7,7 @@ A personal fragrance collection tracking app with **ID-based data model** and **
 ## 📋 Table of Contents
 
 - [Features](#features)
+- [Web Version](#web-version)
 - [Getting Started](#getting-started)
 - [Interface Guide](#interface-guide)
 - [Core Features](#core-features)
@@ -27,6 +28,22 @@ A personal fragrance collection tracking app with **ID-based data model** and **
 - **Fragrantica Integration** - Dual-track display of official data + personal votes
 - **Links Management** - Save and open external links with one click
 - **Event-Driven State** - All states derived from event history
+
+---
+
+## 🌐 Web Version
+
+A read-only web version for browsing your collection on any device:
+
+**URL**: https://boshow88.github.io/Perfume-Tracker/web/
+
+**Features**:
+- Search, Filter, Sort (mirrors desktop functionality)
+- View Fragrantica data and personal votes
+- Responsive design for mobile and desktop
+- Real-time sync with your `perfumes.json` data
+
+**Note**: Read-only - cannot add or edit perfumes (use the desktop app for that)
 
 ---
 
@@ -307,16 +324,21 @@ note_titles_map: Dict[str, str]      # UUID → Quick note title
 ## 🛠 Technical Architecture
 
 ### Tech Stack
-- **Language**: Python 3.7+
-- **GUI**: tkinter (standard library)
+- **Desktop**: Python 3.7+ / tkinter
+- **Web**: HTML / CSS / JavaScript (vanilla, no framework)
 - **Data Storage**: JSON
+- **Hosting**: GitHub Pages (web version)
 
 ### File Structure
 ```
 Fragrance/
-├── perfume_tracker.py      # Main program
+├── perfume_tracker.py      # Main program (desktop)
 ├── data/
 │   └── perfumes.json       # Data file
+├── web/
+│   ├── index.html          # Web version
+│   ├── style.css
+│   └── app.js
 └── README.md               # This file
 ```
 
