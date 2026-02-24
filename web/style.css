@@ -685,6 +685,12 @@ body {
     color: var(--text-secondary);
 }
 
+.event-date-auto {
+    color: var(--text-muted);
+    font-style: italic;
+    opacity: 0.7;
+}
+
 /* Links */
 .links-content {
     display: flex;

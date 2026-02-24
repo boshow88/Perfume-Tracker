@@ -643,8 +643,14 @@ function renderEvents(p) {
     content.innerHTML = events.map(e => {
         const eventType = typeLabels[e.event_type] || e.event_type || 'Event';
         const purchaseType = e.purchase_type || purchaseTypesMap[e.purchase_type_id] || '';
-        const date = e.event_date || e.timestamp?.split('T')[0] || '';
         const location = e.location || '';
+        
+        // Differentiate explicit date vs auto timestamp
+        const hasExplicitDate = e.event_date && e.event_date.trim();
+        const displayDate = hasExplicitDate 
+            ? e.event_date 
+            : (e.timestamp?.split('T')[0] || '');
+        const dateClass = hasExplicitDate ? 'event-date' : 'event-date event-date-auto';
         
         const details = [];
         if (purchaseType) details.push(`[${purchaseType}]`);
@@ -658,7 +664,7 @@ function renderEvents(p) {
                     <span class="event-type">${escapeHtml(eventType)}</span>
                     ${details.length > 0 ? `<span class="event-details">${escapeHtml(details.join(' '))}</span>` : ''}
                 </div>
-                <span class="event-date">${escapeHtml(date)}</span>
+                <span class="${dateClass}">${escapeHtml(displayDate)}</span>
             </div>
         `;
     }).join('');
