@@ -911,23 +911,28 @@ class RangeSlider(tk.Canvas):
         min_x = self._value_to_x(min_val)
         max_x = self._value_to_x(max_val)
         
+        # Visual offset so handles just touch when min = max (like "OO")
+        handle_offset = self.handle_radius  # Full radius for perfect adjacency
+        min_x_visual = min_x - handle_offset
+        max_x_visual = max_x + handle_offset
+        
         # Track background
         self.create_line(self.track_padding, self.track_y, 
                         self.width - self.track_padding, self.track_y,
                         fill=COLORS["text"], width=2)
         
-        # Selected range
-        self.create_line(min_x, self.track_y, max_x, self.track_y,
+        # Selected range (use visual positions)
+        self.create_line(min_x_visual, self.track_y, max_x_visual, self.track_y,
                         fill=COLORS["accent"], width=4)
         
-        # Min handle
-        self.create_oval(min_x - self.handle_radius, self.track_y - self.handle_radius,
-                        min_x + self.handle_radius, self.track_y + self.handle_radius,
+        # Min handle (use visual position)
+        self.create_oval(min_x_visual - self.handle_radius, self.track_y - self.handle_radius,
+                        min_x_visual + self.handle_radius, self.track_y + self.handle_radius,
                         fill=COLORS["accent"], outline=COLORS["text"], tags="min_handle")
         
-        # Max handle
-        self.create_oval(max_x - self.handle_radius, self.track_y - self.handle_radius,
-                        max_x + self.handle_radius, self.track_y + self.handle_radius,
+        # Max handle (use visual position)
+        self.create_oval(max_x_visual - self.handle_radius, self.track_y - self.handle_radius,
+                        max_x_visual + self.handle_radius, self.track_y + self.handle_radius,
                         fill=COLORS["accent"], outline=COLORS["text"], tags="max_handle")
     
     def _on_click(self, event):
@@ -935,8 +940,13 @@ class RangeSlider(tk.Canvas):
         min_x = self._value_to_x(self.var_min.get() if self.var_min else self.from_)
         max_x = self._value_to_x(self.var_max.get() if self.var_max else self.to)
         
-        dist_to_min = abs(event.x - min_x)
-        dist_to_max = abs(event.x - max_x)
+        # Use visual positions for hit detection
+        handle_offset = self.handle_radius
+        min_x_visual = min_x - handle_offset
+        max_x_visual = max_x + handle_offset
+        
+        dist_to_min = abs(event.x - min_x_visual)
+        dist_to_max = abs(event.x - max_x_visual)
         
         if dist_to_min < dist_to_max and dist_to_min < self.handle_radius * 2:
             self.dragging = "min"
@@ -957,20 +967,19 @@ class RangeSlider(tk.Canvas):
         self.dragging = None
     
     def _update_value(self, x):
-        """Update value based on x position (minimum 0.1 gap between handles)"""
+        """Update value based on x position (allow min = max)"""
         value = self._x_to_value(x)
         value = round(value * 10) / 10  # Round to 0.1
-        min_gap = 0.3  # Minimum gap between handles
         
         if self.dragging == "min":
             max_val = self.var_max.get() if self.var_max else self.to
-            value = min(value, max_val - min_gap)  # Keep gap from max
+            value = min(value, max_val)  # Allow min = max
             value = max(value, self.from_)  # Don't go below range
             if self.var_min:
                 self.var_min.set(value)
         elif self.dragging == "max":
             min_val = self.var_min.get() if self.var_min else self.from_
-            value = max(value, min_val + min_gap)  # Keep gap from min
+            value = max(value, min_val)  # Allow max = min
             value = min(value, self.to)  # Don't go above range
             if self.var_max:
                 self.var_max.set(value)

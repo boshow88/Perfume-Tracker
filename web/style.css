@@ -990,7 +990,7 @@ body {
     z-index: 2;
 }
 
-.range-slider-container input[type="range"]::-webkit-slider-thumb {
+.range-slider-container input[type="range"].range-min::-webkit-slider-thumb {
     -webkit-appearance: none;
     appearance: none;
     width: 16px;
@@ -1001,9 +1001,12 @@ body {
     pointer-events: auto;
     border: 2px solid var(--bg-main);
     box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    transform: translateX(-8px);
 }
 
-.range-slider-container input[type="range"]::-moz-range-thumb {
+.range-slider-container input[type="range"].range-max::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
     width: 16px;
     height: 16px;
     border-radius: 50%;
@@ -1012,6 +1015,29 @@ body {
     pointer-events: auto;
     border: 2px solid var(--bg-main);
     box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    transform: translateX(8px);
+}
+
+.range-slider-container input[type="range"].range-min::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    cursor: pointer;
+    pointer-events: auto;
+    transform: translateX(-8px);
+}
+
+.range-slider-container input[type="range"].range-max::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    cursor: pointer;
+    pointer-events: auto;
+    border: 2px solid var(--bg-main);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.3);
+    transform: translateX(8px);
 }
 
 .range-track {

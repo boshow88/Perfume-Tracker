@@ -1004,29 +1004,33 @@ function initScoreRangeSliders() {
         const maxDisplay = item.querySelector('.range-value-max');
         
         function updateSlider() {
-            const minVal = parseFloat(minInput.value);
-            const maxValCurrent = parseFloat(maxInput.value);
+            let minVal = parseFloat(minInput.value);
+            let maxValCurrent = parseFloat(maxInput.value);
             
-            // Ensure min doesn't exceed max
+            // Allow min = max, but don't let min exceed max
             if (minVal > maxValCurrent) {
                 minInput.value = maxValCurrent;
+                minVal = maxValCurrent;
             }
             if (maxValCurrent < minVal) {
                 maxInput.value = minVal;
+                maxValCurrent = minVal;
             }
             
-            const min = parseFloat(minInput.value);
-            const max = parseFloat(maxInput.value);
-            
             // Update display
-            minDisplay.textContent = min.toFixed(1);
-            maxDisplay.textContent = max.toFixed(1);
+            minDisplay.textContent = minVal.toFixed(1);
+            maxDisplay.textContent = maxValCurrent.toFixed(1);
             
-            // Update selected bar position
-            const leftPercent = (min / maxVal) * 100;
-            const rightPercent = (max / maxVal) * 100;
-            selectedBar.style.left = leftPercent + '%';
-            selectedBar.style.width = (rightPercent - leftPercent) + '%';
+            // Update selected bar position (account for thumb offset of 8px)
+            // Thumbs are offset by ±8px for perfect "OO" adjacency
+            const thumbOffset = 8; // pixels
+            const containerWidth = selectedBar.parentElement.offsetWidth || 200;
+            const offsetPercent = (thumbOffset / containerWidth) * 100;
+            
+            const leftPercent = (minVal / maxVal) * 100 - offsetPercent;
+            const rightPercent = (maxValCurrent / maxVal) * 100 + offsetPercent;
+            selectedBar.style.left = Math.max(0, leftPercent) + '%';
+            selectedBar.style.width = Math.min(100 - Math.max(0, leftPercent), rightPercent - Math.max(0, leftPercent)) + '%';
         }
         
         function updateExcludeStyle() {
