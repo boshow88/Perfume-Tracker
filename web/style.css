@@ -743,7 +743,9 @@ body {
     z-index: 1000;
     display: flex;
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
+    padding-top: 5vh;
+    overflow-y: auto;
 }
 
 .modal.hidden {
@@ -760,7 +762,8 @@ body {
     position: relative;
     width: 90%;
     max-width: 500px;
-    max-height: 80vh;
+    max-height: 85vh;
+    margin-bottom: 5vh;
     background: var(--bg-secondary);
     border-radius: var(--radius-lg);
     display: flex;
