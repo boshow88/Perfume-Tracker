@@ -889,15 +889,20 @@ class RangeSlider(tk.Canvas):
         self._draw()
     
     def _value_to_x(self, value):
-        """Convert value to x position"""
-        range_width = self.width - 2 * self.track_padding
+        """Convert value to x position (reduced range to account for handle offset)"""
+        # Handles travel within a smaller range so they don't exceed track bounds when offset
+        effective_start = self.track_padding + self.handle_radius
+        effective_end = self.width - self.track_padding - self.handle_radius
+        range_width = effective_end - effective_start
         ratio = (value - self.from_) / (self.to - self.from_)
-        return self.track_padding + ratio * range_width
+        return effective_start + ratio * range_width
     
     def _x_to_value(self, x):
-        """Convert x position to value"""
-        range_width = self.width - 2 * self.track_padding
-        ratio = (x - self.track_padding) / range_width
+        """Convert x position to value (reduced range to account for handle offset)"""
+        effective_start = self.track_padding + self.handle_radius
+        effective_end = self.width - self.track_padding - self.handle_radius
+        range_width = effective_end - effective_start
+        ratio = (x - effective_start) / range_width
         ratio = max(0, min(1, ratio))
         return self.from_ + ratio * (self.to - self.from_)
     

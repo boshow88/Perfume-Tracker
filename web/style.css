@@ -979,7 +979,8 @@ body {
 
 .range-slider-container input[type="range"] {
     position: absolute;
-    width: 100%;
+    width: calc(100% - 16px); /* Reduced to keep handles within track bounds */
+    left: 8px;
     height: 5px;
     top: 50%;
     transform: translateY(-50%);

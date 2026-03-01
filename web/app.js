@@ -1021,16 +1021,18 @@ function initScoreRangeSliders() {
             minDisplay.textContent = minVal.toFixed(1);
             maxDisplay.textContent = maxValCurrent.toFixed(1);
             
-            // Update selected bar position (account for thumb offset of 8px)
-            // Thumbs are offset by ±8px for perfect "OO" adjacency
-            const thumbOffset = 8; // pixels
+            // Update selected bar position
+            // Sliders are narrower (100% - 16px) and start at 8px, so calculate within that range
+            const sliderMargin = 8; // px from each side
             const containerWidth = selectedBar.parentElement.offsetWidth || 200;
-            const offsetPercent = (thumbOffset / containerWidth) * 100;
+            const effectiveWidth = containerWidth - 2 * sliderMargin;
             
-            const leftPercent = (minVal / maxVal) * 100 - offsetPercent;
-            const rightPercent = (maxValCurrent / maxVal) * 100 + offsetPercent;
-            selectedBar.style.left = Math.max(0, leftPercent) + '%';
-            selectedBar.style.width = Math.min(100 - Math.max(0, leftPercent), rightPercent - Math.max(0, leftPercent)) + '%';
+            // Calculate positions within the effective slider range
+            const minPos = sliderMargin + (minVal / maxVal) * effectiveWidth - 8; // -8 for min thumb offset
+            const maxPos = sliderMargin + (maxValCurrent / maxVal) * effectiveWidth + 8; // +8 for max thumb offset
+            
+            selectedBar.style.left = Math.max(0, minPos) + 'px';
+            selectedBar.style.width = Math.min(containerWidth, maxPos) - Math.max(0, minPos) + 'px';
         }
         
         function updateExcludeStyle() {
