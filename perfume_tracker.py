@@ -1616,17 +1616,19 @@ class EditEventsDialog(tk.Toplevel):
         list_frame.pack(fill="both", expand=True, padx=10, pady=5)
         
         # Treeview for events
-        columns = ("date", "action", "detail", "note")
+        columns = ("date", "action", "location", "detail", "note")
         self.tree = ttk.Treeview(list_frame, columns=columns, show="headings", height=12)
         self.tree.heading("date", text="Date")
         self.tree.heading("action", text="Action")
+        self.tree.heading("location", text="Location")
         self.tree.heading("detail", text="Detail")
         self.tree.heading("note", text="Note")
         
-        self.tree.column("date", width=100, anchor="center")
-        self.tree.column("action", width=80, anchor="center")
-        self.tree.column("detail", width=200)
-        self.tree.column("note", width=180)
+        self.tree.column("date", width=90, anchor="center")
+        self.tree.column("action", width=70, anchor="center")
+        self.tree.column("location", width=120)
+        self.tree.column("detail", width=130)
+        self.tree.column("note", width=150)
         
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -1692,10 +1694,11 @@ class EditEventsDialog(tk.Toplevel):
             # Action label
             action_label = action_labels.get(e.event_type, e.event_type)
             
-            # Detail
+            # Location (separate column)
+            loc_str = e.location or ""
+            
+            # Detail (ml, price, purchase_type)
             details = []
-            if e.location:
-                details.append(f"@{e.location}")
             if e.ml_delta is not None:
                 # Show 1 decimal if needed, otherwise integer
                 ml_str = f"{e.ml_delta:+.1f}".rstrip('0').rstrip('.')
@@ -1708,7 +1711,7 @@ class EditEventsDialog(tk.Toplevel):
                 details.append(f"[{e.purchase_type}]")
             detail_str = " ".join(details)
             
-            self.tree.insert("", "end", iid=e.id, values=(date_str, action_label, detail_str, e.note or ""))
+            self.tree.insert("", "end", iid=e.id, values=(date_str, action_label, loc_str, detail_str, e.note or ""))
         
         # Update want button text based on current state
         self._update_want_button()
@@ -1897,45 +1900,53 @@ class EditEventsDialog(tk.Toplevel):
         date_entry.grid(row=0, column=1, sticky="w", pady=6)
         ttk.Label(frm, text="(YYYY-MM-DD, optional)", style="Muted.TLabel").grid(row=0, column=2, sticky="w", padx=(5, 0))
         
+        # Location (with search, optional)
+        ttk.Label(frm, text="Location:", style="TLabel").grid(row=1, column=0, sticky="e", padx=(0, 8), pady=6)
+        location_names = self.app.get_all_outlet_names()
+        var_loc = tk.StringVar(value=edit_event.location if is_edit else "")
+        loc_cb = ttk.Combobox(frm, textvariable=var_loc, width=25)
+        make_combobox_searchable(loc_cb, location_names)
+        loc_cb.grid(row=1, column=1, sticky="w", pady=6)
+        
         # Format (full/tester/decant) - readonly, can only select from list
-        ttk.Label(frm, text="Format:", style="TLabel").grid(row=1, column=0, sticky="e", padx=(0, 8), pady=6)
+        ttk.Label(frm, text="Format:", style="TLabel").grid(row=2, column=0, sticky="e", padx=(0, 8), pady=6)
         format_names = self.app.get_all_purchase_type_names()
         default_format = edit_event.purchase_type if is_edit else (format_names[0] if format_names else "")
         var_format = tk.StringVar(value=default_format)
         format_cb = ttk.Combobox(frm, textvariable=var_format, values=format_names, width=15, state="readonly")
-        format_cb.grid(row=1, column=1, sticky="w", pady=6)
+        format_cb.grid(row=2, column=1, sticky="w", pady=6)
         
         # ML (positive only) - for edit, show absolute value
-        ttk.Label(frm, text="ML:", style="TLabel").grid(row=2, column=0, sticky="e", padx=(0, 8), pady=6)
+        ttk.Label(frm, text="ML:", style="TLabel").grid(row=3, column=0, sticky="e", padx=(0, 8), pady=6)
         default_ml = abs(edit_event.ml_delta) if is_edit and edit_event.ml_delta else 0
         var_ml = tk.StringVar(value=str(default_ml))
         ml_entry = ttk.Entry(frm, textvariable=var_ml, width=10)
-        ml_entry.grid(row=2, column=1, sticky="w", pady=6)
+        ml_entry.grid(row=3, column=1, sticky="w", pady=6)
         
         # Quick ML buttons
         ml_btns = ttk.Frame(frm, style="TFrame")
-        ml_btns.grid(row=2, column=2, sticky="w", padx=(8, 0))
+        ml_btns.grid(row=3, column=2, sticky="w", padx=(8, 0))
         for txt, val in [("1", "1"), ("5", "5"), ("10", "10"), ("30", "30"), ("50", "50"), ("100", "100")]:
             ttk.Button(ml_btns, text=txt, width=3, 
                       command=lambda v=val: var_ml.set(v)).pack(side="left", padx=1)
         
         # Price (non-negative, blank = not entered)
-        ttk.Label(frm, text="Price:", style="TLabel").grid(row=3, column=0, sticky="e", padx=(0, 8), pady=6)
+        ttk.Label(frm, text="Price:", style="TLabel").grid(row=4, column=0, sticky="e", padx=(0, 8), pady=6)
         # Show blank if None, otherwise show the number (including 0)
         default_price_str = "" if (not is_edit or edit_event.price is None) else str(edit_event.price)
         var_price = tk.StringVar(value=default_price_str)
         price_entry = ttk.Entry(frm, textvariable=var_price, width=10)
-        price_entry.grid(row=3, column=1, sticky="w", pady=6)
+        price_entry.grid(row=4, column=1, sticky="w", pady=6)
         
         # Note
-        ttk.Label(frm, text="Note:", style="TLabel").grid(row=4, column=0, sticky="e", padx=(0, 8), pady=6)
+        ttk.Label(frm, text="Note:", style="TLabel").grid(row=5, column=0, sticky="e", padx=(0, 8), pady=6)
         var_note = tk.StringVar(value=edit_event.note if is_edit else "")
         note_entry = ttk.Entry(frm, textvariable=var_note, width=28)
-        note_entry.grid(row=4, column=1, columnspan=2, sticky="w", pady=6)
+        note_entry.grid(row=5, column=1, columnspan=2, sticky="w", pady=6)
         
         # Buttons
         btn_frame = ttk.Frame(frm, style="TFrame")
-        btn_frame.grid(row=5, column=0, columnspan=3, sticky="e", pady=(10, 0))
+        btn_frame.grid(row=6, column=0, columnspan=3, sticky="e", pady=(10, 0))
         
         def do_save():
             # Validate ML - must be positive number
@@ -1971,11 +1982,17 @@ class EditEventsDialog(tk.Toplevel):
                     messagebox.showwarning("Invalid", "Date must be in YYYY-MM-DD format.")
                     return
             
+            loc_str = var_loc.get().strip()
+            # Auto-create outlet if new location entered
+            if loc_str:
+                self.app.find_or_create_outlet(loc_str)
+            
             if is_edit:
                 # Update existing event
                 name = var_format.get().strip()
                 edit_event.purchase_type = name
                 edit_event.purchase_type_id = self.app.get_purchase_type_id_by_name(name)
+                edit_event.location = loc_str
                 edit_event.ml_delta = ml if event_type == "buy" else -ml if ml else None
                 edit_event.price = price  # None if blank, 0 if free, or actual price
                 edit_event.note = var_note.get().strip()
@@ -1984,7 +2001,7 @@ class EditEventsDialog(tk.Toplevel):
             else:
                 self.app._add_event_transaction(
                     self.perfume, event_type, 
-                    var_format.get(), ml, price, var_note.get(), date_val
+                    var_format.get(), ml, price, var_note.get(), date_val, loc_str
                 )
             self._refresh_list()
             self.app._on_select()  # Refresh main window to update owned ml
@@ -4926,7 +4943,8 @@ class App(tk.Tk):
         self.save()
     
     def _add_event_transaction(self, perfume: "Perfume", event_type: str, 
-                                item_type: str = "", ml: float = 0, price: Optional[float] = None, note: str = "", event_date: str = ""):
+                                item_type: str = "", ml: float = 0, price: Optional[float] = None, 
+                                note: str = "", event_date: str = "", location: str = ""):
         """Add buy/sell type event"""
         name = item_type.strip()
         pt_id = self.get_purchase_type_id_by_name(name)
@@ -4935,6 +4953,7 @@ class App(tk.Tk):
             perfume_id=perfume.id,
             event_type=event_type,
             timestamp=now_ts(),
+            location=location.strip(),
             ml_delta=ml if event_type == "buy" else -ml if ml else None,
             price=price,  # None if not entered, 0 if free, or actual price
             purchase_type=name,
