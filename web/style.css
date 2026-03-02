@@ -161,6 +161,12 @@ body {
     font-size: 0.8rem;
 }
 
+#toggle-all-votes {
+    min-width: 36px;
+    text-align: center;
+    font-family: monospace;
+}
+
 .btn-close {
     background: none;
     border: none;

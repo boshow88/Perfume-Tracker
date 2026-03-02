@@ -595,16 +595,19 @@ function renderFragrantica(p) {
 }
 
 function toggleAllVoteBlocks() {
+    const btn = document.getElementById('toggle-all-votes');
     const blocks = document.querySelectorAll('.vote-block');
-    const allExpanded = Array.from(blocks).every(b => b.classList.contains('expanded'));
+    
+    // Determine action based on current button text (like desktop)
+    const shouldExpand = btn.textContent === '++';
     
     blocks.forEach(block => {
-        if (allExpanded) {
-            block.classList.remove('expanded');
-            block.querySelector('.vote-block-toggle').textContent = '+';
-        } else {
+        if (shouldExpand) {
             block.classList.add('expanded');
             block.querySelector('.vote-block-toggle').textContent = '-';
+        } else {
+            block.classList.remove('expanded');
+            block.querySelector('.vote-block-toggle').textContent = '+';
         }
     });
     
@@ -617,7 +620,15 @@ function updateToggleAllButton() {
     if (blocks.length === 0) return;
     
     const allExpanded = Array.from(blocks).every(b => b.classList.contains('expanded'));
-    btn.textContent = allExpanded ? '--' : '++';
+    const allCollapsed = Array.from(blocks).every(b => !b.classList.contains('expanded'));
+    
+    // Only update at extremes, keep current state for partial (like desktop)
+    if (allExpanded) {
+        btn.textContent = '--';
+    } else if (allCollapsed) {
+        btn.textContent = '++';
+    }
+    // Partial state: don't change button text
 }
 
 function renderEvents(p) {
