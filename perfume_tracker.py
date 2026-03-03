@@ -678,7 +678,12 @@ def calculate_rating_summary(votes: Dict[str, int], keys: List[str]) -> str:
     weights = {keys[0]: 5, keys[1]: 4, keys[2]: 3, keys[3]: 2, keys[4]: 1}  # love to hate
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     score = weighted_sum / total
-    return f"{score:.2f}"
+    
+    # Map score to label
+    index = round(5 - score)  # score 5→0, 1→4
+    index = max(0, min(len(keys)-1, index))
+    label = display_label(keys[index])
+    return f"{score:.1f} {label}"
 
 
 def calculate_when_summary(votes: Dict[str, int], keys: List[str]) -> str:
@@ -723,59 +728,81 @@ def calculate_when_summary(votes: Dict[str, int], keys: List[str]) -> str:
 
 
 def calculate_longevity_summary(votes: Dict[str, int], keys: List[str]) -> str:
-    """Calculate weighted average: poor=1 to enormous=5"""
+    """Calculate weighted average: eternal=5 to poor=1"""
     total = sum(int(votes.get(k, 0) or 0) for k in keys)
     if total == 0:
         return "—"
     
-    weights = {keys[i]: i+1 for i in range(len(keys))}  # 1 to 5
+    # Reverse weights: first item (best) = highest score
+    n = len(keys)
+    weights = {keys[i]: n - i for i in range(n)}  # eternal=5, long=4, ..., poor=1
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     score = weighted_sum / total
-    return f"{score:.2f}"
+    
+    # Map score to label (high score = first item)
+    index = round(n - score)
+    index = max(0, min(n-1, index))
+    label = display_label(keys[index])
+    return f"{score:.1f} {label}"
 
 
 def calculate_sillage_summary(votes: Dict[str, int], keys: List[str]) -> str:
-    """Calculate weighted average: intimate=1 to enormous=4"""
+    """Calculate weighted average: enormous=4 to intimate=1"""
     total = sum(int(votes.get(k, 0) or 0) for k in keys)
     if total == 0:
         return "—"
     
-    weights = {keys[i]: i+1 for i in range(len(keys))}  # 1 to 4
+    # Reverse weights: first item (best) = highest score
+    n = len(keys)
+    weights = {keys[i]: n - i for i in range(n)}  # enormous=4, strong=3, moderate=2, intimate=1
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     score = weighted_sum / total
-    return f"{score:.2f}"
+    
+    # Map score to label (high score = first item)
+    index = round(n - score)
+    index = max(0, min(n-1, index))
+    label = display_label(keys[index])
+    return f"{score:.1f} {label}"
 
 
 def calculate_gender_summary(votes: Dict[str, int], keys: List[str]) -> str:
-    """Calculate weighted average and map to nearest option"""
+    """Calculate weighted average and show as spectrum position"""
     total = sum(int(votes.get(k, 0) or 0) for k in keys)
     if total == 0:
         return "—"
     
-    weights = {keys[i]: i+1 for i in range(len(keys))}  # 1 to 5
+    weights = {keys[i]: i+1 for i in range(len(keys))}  # male=1 to female=5
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     score = weighted_sum / total
     
     # Map to nearest option
     index = round(score - 1)  # score 1-5 → index 0-4
-    index = max(0, min(len(keys)-1, index))  # clamp
-    return display_label(keys[index])
+    index = max(0, min(len(keys)-1, index))
+    label = display_label(keys[index])
+    
+    # Visual spectrum: ♂----●----♀
+    pos = int((score - 1) / 4 * 8)  # 0-8 position
+    spectrum = "♂" + "─" * pos + "●" + "─" * (8 - pos) + "♀"
+    return f"{spectrum} {label}"
 
 
 def calculate_value_summary(votes: Dict[str, int], keys: List[str]) -> str:
-    """Calculate weighted average and map to nearest option (dynamic)"""
+    """Calculate weighted average and map to nearest option: excellent=5 to overpriced=1"""
     total = sum(int(votes.get(k, 0) or 0) for k in keys)
     if total == 0:
         return "—"
     
-    weights = {keys[i]: i+1 for i in range(len(keys))}  # dynamic 1 to N
+    # Reverse weights: first item (best) = highest score
+    n = len(keys)
+    weights = {keys[i]: n - i for i in range(n)}  # excellent=5, ..., overpriced=1
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     score = weighted_sum / total
     
-    # Map to nearest option
-    index = round(score - 1)
-    index = max(0, min(len(keys)-1, index))
-    return display_label(keys[index])
+    # Map to nearest option (high score = first item)
+    index = round(n - score)
+    index = max(0, min(n-1, index))
+    label = display_label(keys[index])
+    return f"{score:.1f} {label}"
 
 
 # -----------------------------
@@ -792,21 +819,23 @@ def calculate_rating_score(votes: Dict[str, int], keys: List[str]) -> float:
 
 
 def calculate_longevity_score(votes: Dict[str, int], keys: List[str]) -> float:
-    """Calculate longevity score: 1 to 5"""
+    """Calculate longevity score: eternal=5 to poor=1"""
     total = sum(int(votes.get(k, 0) or 0) for k in keys)
     if total == 0:
         return 0.0
-    weights = {keys[i]: i+1 for i in range(len(keys))}
+    n = len(keys)
+    weights = {keys[i]: n - i for i in range(n)}  # eternal=5, long=4, ..., poor=1
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     return weighted_sum / total
 
 
 def calculate_sillage_score(votes: Dict[str, int], keys: List[str]) -> float:
-    """Calculate sillage score: 1 to 4"""
+    """Calculate sillage score: enormous=4 to intimate=1"""
     total = sum(int(votes.get(k, 0) or 0) for k in keys)
     if total == 0:
         return 0.0
-    weights = {keys[i]: i+1 for i in range(len(keys))}
+    n = len(keys)
+    weights = {keys[i]: n - i for i in range(n)}  # enormous=4, ..., intimate=1
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     return weighted_sum / total
 
@@ -822,11 +851,12 @@ def calculate_gender_score(votes: Dict[str, int], keys: List[str]) -> float:
 
 
 def calculate_value_score(votes: Dict[str, int], keys: List[str]) -> float:
-    """Calculate value score: 1 to N (dynamic)"""
+    """Calculate value score: excellent=5 to overpriced=1"""
     total = sum(int(votes.get(k, 0) or 0) for k in keys)
     if total == 0:
         return 0.0
-    weights = {keys[i]: i+1 for i in range(len(keys))}
+    n = len(keys)
+    weights = {keys[i]: n - i for i in range(n)}  # excellent=5, ..., overpriced=1
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     return weighted_sum / total
 
@@ -4478,11 +4508,11 @@ class App(tk.Tk):
         elif dimension == "gender":
             fr = (p.fragrantica or {}).get("gender_votes", {})
             score = calculate_gender_score(fr, GENDER_5)
-            # female_first: lower score first, male_first: higher score first
+            # With male=1, female=5: female_first needs -score, male_first needs score
             if order == "female_first":
-                return (score,)
+                return (-score,)  # Higher score (female=5) comes first
             elif order == "male_first":
-                return (-score,)
+                return (score,)  # Lower score (male=1) comes first
             else:  # unisex_first (score close to 3.0)
                 return (abs(score - 3.0),)
         

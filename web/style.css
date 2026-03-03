@@ -579,6 +579,11 @@ body {
     font-size: 0.95rem;
 }
 
+.block-score.gender-spectrum {
+    font-family: monospace;
+    letter-spacing: -1px;
+}
+
 .block-sample {
     font-size: 0.75rem;
     color: var(--text-muted);

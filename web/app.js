@@ -99,7 +99,7 @@ const VOTE_BLOCKS = [
         myKey: 'my_gender_votes',
         label: 'Gender',
         keys: ['male', 'more_male', 'unisex', 'more_female', 'female'],
-        weights: [5, 4, 3, 2, 1],
+        weights: [1, 2, 3, 4, 5],  // male=1 to female=5 (same as desktop)
         maxScore: 5,
         normalize: 'sum'
     },
@@ -539,10 +539,23 @@ function renderFragrantica(p) {
         const score = calculateScore(fData, block);
         const sampleSize = getSampleSize(fData, block);
         
-        // Build score display
+        // Build score display with label
         let scoreDisplay = '';
         if (score !== null && block.maxScore) {
-            scoreDisplay = `<span class="block-score">${score.toFixed(1)}</span>`;
+            if (block.key === 'gender_votes') {
+                // Gender: visual spectrum ♂────●────♀ label
+                const pos = Math.round((score - 1) / 4 * 8);  // 0-8 position (male=1, female=5)
+                const spectrum = '♂' + '─'.repeat(pos) + '●' + '─'.repeat(8 - pos) + '♀';
+                const index = Math.round(score - 1);
+                const label = block.keys[Math.max(0, Math.min(4, index))].replace(/_/g, ' ');
+                scoreDisplay = `<span class="block-score gender-spectrum">${spectrum} ${label}</span>`;
+            } else {
+                // Other blocks: score + label like "4.5 eternal"
+                const n = block.keys.length;
+                const index = Math.round(n - score);
+                const label = block.keys[Math.max(0, Math.min(n - 1, index))].replace(/_/g, ' ');
+                scoreDisplay = `<span class="block-score">${score.toFixed(1)} ${label}</span>`;
+            }
         }
         
         // Build items with bar charts
