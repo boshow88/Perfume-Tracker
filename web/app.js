@@ -576,12 +576,10 @@ function renderFragrantica(p) {
         let scoreDisplay = '';
         if (score !== null && block.maxScore) {
             if (block.key === 'gender_votes') {
-                // Gender: visual spectrum ♂────●────♀ label
+                // Gender: visual spectrum only ♂────●────♀
                 const pos = Math.round((score - 1) / 4 * 8);  // 0-8 position (male=1, female=5)
                 const spectrum = '♂' + '─'.repeat(pos) + '●' + '─'.repeat(8 - pos) + '♀';
-                const index = Math.round(score - 1);
-                const label = block.keys[Math.max(0, Math.min(4, index))].replace(/_/g, ' ');
-                scoreDisplay = `<span class="block-score gender-spectrum">${spectrum} ${label}</span>`;
+                scoreDisplay = `<span class="block-score gender-spectrum">${spectrum}</span>`;
             } else {
                 // Other blocks: score + label like "4.5 eternal"
                 const n = block.keys.length;

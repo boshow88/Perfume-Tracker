@@ -775,15 +775,10 @@ def calculate_gender_summary(votes: Dict[str, int], keys: List[str]) -> str:
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     score = weighted_sum / total
     
-    # Map to nearest option
-    index = round(score - 1)  # score 1-5 → index 0-4
-    index = max(0, min(len(keys)-1, index))
-    label = display_label(keys[index])
-    
-    # Visual spectrum: ♂----●----♀
+    # Visual spectrum only: ♂────●────♀
     pos = int((score - 1) / 4 * 8)  # 0-8 position
     spectrum = "♂" + "─" * pos + "●" + "─" * (8 - pos) + "♀"
-    return f"{spectrum} {label}"
+    return spectrum
 
 
 def calculate_value_summary(votes: Dict[str, int], keys: List[str]) -> str:
