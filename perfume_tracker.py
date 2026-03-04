@@ -1332,6 +1332,7 @@ class SortDialog(tk.Toplevel):
     DIMENSIONS = [
         ("brand", "Brand"),
         ("name", "Name"),
+        ("location", "Location"),
         ("rating", "Rating"),
         ("longevity", "Longevity"),
         ("sillage", "Sillage"),
@@ -4489,6 +4490,29 @@ class App(tk.Tk):
         
         elif dimension == "name":
             return (p.name.lower(),) if order == "asc" else (p.name.lower(), True)
+        
+        elif dimension == "location":
+            # Get indices of locations in outlets_map order
+            outlet_order = list(self.app_data.outlets_map.keys())
+            indices = []
+            for oid in (p.outlet_ids or []):
+                if oid in outlet_order:
+                    indices.append(outlet_order.index(oid))
+            
+            if not indices:
+                # No locations: put at end
+                return (float('inf'),)
+            
+            if order == "asc":
+                # Sort by min index first, then second-min, etc.
+                # Fewer locations = higher priority (comes first when tied)
+                sorted_indices = tuple(sorted(indices))
+                return sorted_indices
+            else:  # desc
+                # Sort by max index first (descending), then second-max, etc.
+                # Use negative to reverse order, fewer locations = higher priority
+                sorted_desc = tuple(sorted(indices, reverse=True))
+                return tuple(-i for i in sorted_desc)
         
         elif dimension == "rating":
             fr = (p.fragrantica or {}).get("rating_votes", {})

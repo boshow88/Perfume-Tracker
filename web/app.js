@@ -272,13 +272,31 @@ function getMapIndex(map, id) {
     return index >= 0 ? index : keys.length; // Put unknown IDs at the end
 }
 
-function getSortValue(p, field) {
+function getSortValue(p, field, ascending = true) {
     switch (field) {
         case 'brand':
             // Use map order (user's custom order from desktop)
             return getMapIndex(brandsMap, p.brand_id);
         case 'name':
             return (p.name || '').toLowerCase();
+        case 'location':
+            // Get indices of locations in outlets_map order
+            const outletOrder = Object.keys(outletsMap);
+            const indices = (p.outlet_ids || [])
+                .map(id => outletOrder.indexOf(id))
+                .filter(i => i >= 0);
+            
+            if (indices.length === 0) {
+                return [Infinity];  // No locations: put at end
+            }
+            
+            if (ascending) {
+                // Sort by min index first, then second-min, etc.
+                return indices.slice().sort((a, b) => a - b);
+            } else {
+                // Sort by max index first (descending), then second-max, etc.
+                return indices.slice().sort((a, b) => b - a);
+            }
         case 'concentration':
             // Use map order (user's custom order from desktop)
             return getMapIndex(concentrationsMap, p.concentration_id);
@@ -300,8 +318,23 @@ function getSortValue(p, field) {
 }
 
 function comparePerfumes(a, b, field, ascending) {
-    const valA = getSortValue(a, field);
-    const valB = getSortValue(b, field);
+    const valA = getSortValue(a, field, ascending);
+    const valB = getSortValue(b, field, ascending);
+    
+    // Handle array comparison (for location)
+    if (Array.isArray(valA) && Array.isArray(valB)) {
+        const len = Math.max(valA.length, valB.length);
+        for (let i = 0; i < len; i++) {
+            const ai = valA[i] ?? Infinity;  // Missing = put at end
+            const bi = valB[i] ?? Infinity;
+            if (ai !== bi) {
+                // For ascending, smaller index first
+                // For descending, we already reversed the array in getSortValue
+                return ai - bi;
+            }
+        }
+        return 0;
+    }
     
     let result;
     if (typeof valA === 'number' && typeof valB === 'number') {
@@ -881,6 +914,7 @@ function handleSearch() {
 const SORT_FIELD_LABELS = {
     brand: 'Brand',
     name: 'Name',
+    location: 'Location',
     concentration: 'Concentration',
     state: 'State',
     rating: 'Rating',
