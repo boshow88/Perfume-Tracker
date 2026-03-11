@@ -4656,22 +4656,42 @@ class App(tk.Tk):
                 else:
                     preview = content
                 
-                # Use Label with dynamic wraplength for auto-wrap
-                content_label = tk.Label(note_frame, text=preview, 
-                                       fg=COLORS["text"], bg=COLORS["panel"],
-                                       anchor="nw", justify="left",
-                                       cursor="hand2" if has_more else "arrow")
-                content_label.pack(fill="x", anchor="w")
+                # Use Text widget with wrap="char" for Chinese
+                content_text = tk.Text(note_frame,
+                                      fg=COLORS["text"], bg=COLORS["panel"],
+                                      font=self.font_normal,
+                                      wrap="char",
+                                      borderwidth=0, highlightthickness=0,
+                                      cursor="hand2" if has_more else "arrow",
+                                      width=40, height=1)
+                content_text.insert("1.0", preview)
+                content_text.config(state="disabled")
+                content_text.pack(fill="x", anchor="w")
                 
-                # Dynamic wraplength - update when frame resizes
-                def update_wraplength(event, label=content_label):
-                    # Use frame width minus some padding
-                    new_width = max(100, event.width - 20)
-                    label.config(wraplength=new_width)
-                note_frame.bind("<Configure>", update_wraplength)
+                # Update size when frame resizes
+                def update_text_size(event, tw=content_text, nf=note_frame):
+                    try:
+                        if not nf.winfo_exists():
+                            return
+                        if event.width < 50:
+                            return
+                        char_w = self.font_normal.measure("啊")
+                        new_width = max(10, (event.width - 10) // char_w)
+                        tw.config(state="normal", width=new_width)
+                        tw.update_idletasks()
+                        # Count display lines (not text lines)
+                        tw.see("1.0")
+                        info = tw.count("1.0", "end", "displaylines")
+                        line_count = info[0] if info else 1
+                        tw.config(height=max(1, line_count), state="disabled")
+                    except tk.TclError:
+                        pass  # Widget was destroyed
+                
+                note_frame.bind("<Configure>", update_text_size)
+                self.after(50, lambda nf=note_frame: update_text_size(type('E', (), {'width': nf.winfo_width()})(), nf=nf) if nf.winfo_exists() else None)
                 
                 if has_more:
-                    content_label.bind("<Button-1>", lambda e, n=note: self._show_note_popup(n))
+                    content_text.bind("<Button-1>", lambda e, n=note: self._show_note_popup(n))
                     more_label = tk.Label(note_frame, text="[more]", 
                                         fg=COLORS["muted"], bg=COLORS["panel"],
                                         cursor="hand2", anchor="w")
@@ -4731,7 +4751,7 @@ class App(tk.Tk):
         text_frame = ttk.Frame(popup, style="Panel.TFrame")
         text_frame.pack(fill="both", expand=True, padx=15, pady=(0, 15))
         
-        text_widget = tk.Text(text_frame, wrap="word", 
+        text_widget = tk.Text(text_frame, wrap="char", 
                              bg=COLORS["panel"], fg=COLORS["text"],
                              font=self.font_normal, insertbackground="#888888",
                              relief="flat", padx=5, pady=5)
@@ -5667,7 +5687,7 @@ class App(tk.Tk):
         content_frame = ttk.Frame(frm, style="TFrame")
         content_frame.pack(fill="both", expand=True)
         
-        content_text = tk.Text(content_frame, wrap="word", 
+        content_text = tk.Text(content_frame, wrap="char", 
                               font=self.font_normal,
                               bg=COLORS["bg"], fg=COLORS["text"],
                               insertbackground="#888888")
