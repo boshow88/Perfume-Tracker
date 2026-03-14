@@ -28,6 +28,7 @@ let filteredPerfumes = [];
 let selectedPerfumeId = null;
 
 let brandsMap = {};
+let ownedMlIncludeFormats = ['full'];  // Default: only full bottles count
 let concentrationsMap = {};
 let outletsMap = {};
 let tagsMap = {};
@@ -139,6 +140,12 @@ function setupEventListeners() {
     document.getElementById('filter-apply').addEventListener('click', applyFilters);
     document.getElementById('filter-clear').addEventListener('click', clearFilters);
     
+    // Settings modal
+    document.getElementById('settings-btn').addEventListener('click', openSettingsModal);
+    document.getElementById('settings-apply').addEventListener('click', applySettings);
+    document.getElementById('settings-reset').addEventListener('click', resetSettings);
+    document.getElementById('settings-font-size').addEventListener('input', previewFontSize);
+    
     // Score range sliders
     initScoreRangeSliders();
     
@@ -173,9 +180,15 @@ async function loadData() {
         tagsMap = appData.tags_map || {};
         noteTitlesMap = appData.note_titles_map || {};
         purchaseTypesMap = appData.purchase_types_map || {};
-        
+        ownedMlIncludeFormats = appData.owned_ml_include_formats || ['full'];
+
+        // Apply font size setting (convert pt to px, roughly 1.33x)
+        const fontSizePt = appData.font_size || 10;
+        const fontSizePx = Math.round(fontSizePt * 1.33);
+        document.documentElement.style.fontSize = fontSizePx + 'px';
+
         perfumes = appData.perfumes || [];
-        
+
         applyFiltersAndSort();
         populateFilterOptions();
         
@@ -358,19 +371,23 @@ function getStatePriority(p) {
 function getStateCategory(p) {
     const events = p.events || [];
     if (events.length === 0) return 'new';
-    
+
     let ownedMl = 0;
     for (const e of events) {
         if (e.ml_delta !== null && e.ml_delta !== undefined) {
-            ownedMl += e.ml_delta;
+            // Only count if purchase_type is in ownedMlIncludeFormats
+            const purchaseType = purchaseTypesMap[e.purchase_type_id] || '';
+            if (ownedMlIncludeFormats.includes(purchaseType)) {
+                ownedMl += e.ml_delta;
+            }
         }
     }
-    
+
     if (ownedMl > 0) return 'owned';
-    
+
     const hasSmelled = events.some(e => e.event_type === 'smell' || e.event_type === 'skin');
     if (hasSmelled) return 'smelled';
-    
+
     return 'new';
 }
 
@@ -500,7 +517,11 @@ function deriveState(p) {
             }
         }
         if (e.ml_delta !== null && e.ml_delta !== undefined) {
-            ownedMl += e.ml_delta;
+            // Only count if purchase_type is in ownedMlIncludeFormats
+            const purchaseType = purchaseTypesMap[e.purchase_type_id] || '';
+            if (ownedMlIncludeFormats.includes(purchaseType)) {
+                ownedMl += e.ml_delta;
+            }
         }
     }
     
@@ -1012,6 +1033,71 @@ function resetSort() {
 function closeAllModals() {
     document.getElementById('sort-modal').classList.add('hidden');
     document.getElementById('filter-modal').classList.add('hidden');
+    document.getElementById('settings-modal').classList.add('hidden');
+}
+
+// ============================================
+// Settings Modal
+// ============================================
+
+let originalFontSize = 10;
+let originalOwnedFormats = ['full'];
+
+function openSettingsModal() {
+    const modal = document.getElementById('settings-modal');
+    modal.classList.remove('hidden');
+    
+    // Store original values for reset
+    originalFontSize = appData.font_size || 10;
+    originalOwnedFormats = [...ownedMlIncludeFormats];
+    
+    // Set font size slider
+    const slider = document.getElementById('settings-font-size');
+    const currentPt = Math.round(parseInt(document.documentElement.style.fontSize || '13') / 1.33);
+    slider.value = currentPt;
+    document.getElementById('settings-font-size-label').textContent = currentPt + 'pt';
+    
+    // Populate owned formats checkboxes
+    const container = document.getElementById('settings-owned-formats');
+    container.innerHTML = '';
+    for (const [id, name] of Object.entries(purchaseTypesMap)) {
+        const checked = ownedMlIncludeFormats.includes(name) ? 'checked' : '';
+        container.innerHTML += `
+            <label class="checkbox-item">
+                <input type="checkbox" value="${name}" ${checked}> ${name}
+            </label>
+        `;
+    }
+}
+
+function previewFontSize() {
+    const slider = document.getElementById('settings-font-size');
+    const pt = parseInt(slider.value);
+    document.getElementById('settings-font-size-label').textContent = pt + 'pt';
+    document.documentElement.style.fontSize = Math.round(pt * 1.33) + 'px';
+}
+
+function applySettings() {
+    // Get selected owned formats
+    const checkboxes = document.querySelectorAll('#settings-owned-formats input:checked');
+    ownedMlIncludeFormats = Array.from(checkboxes).map(cb => cb.value);
+    
+    closeAllModals();
+    applyFiltersAndSort();  // Refresh list with new owned ml calculation
+}
+
+function resetSettings() {
+    // Reset to original JSON values
+    document.getElementById('settings-font-size').value = originalFontSize;
+    document.getElementById('settings-font-size-label').textContent = originalFontSize + 'pt';
+    document.documentElement.style.fontSize = Math.round(originalFontSize * 1.33) + 'px';
+    
+    ownedMlIncludeFormats = [...originalOwnedFormats];
+    
+    // Update checkboxes
+    document.querySelectorAll('#settings-owned-formats input').forEach(cb => {
+        cb.checked = ownedMlIncludeFormats.includes(cb.value);
+    });
 }
 
 function updateSortButtonState() {

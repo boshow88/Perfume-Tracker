@@ -23,6 +23,10 @@
                     <span class="icon">⏚</span>
                     <span class="label">Filter</span>
                 </button>
+                <button id="settings-btn" class="btn btn-action">
+                    <span class="icon">⚙</span>
+                    <span class="label">Settings</span>
+                </button>
             </div>
         </header>
 
@@ -344,6 +348,37 @@
                 <div class="modal-footer">
                     <button id="filter-clear" class="btn btn-secondary">Clear All</button>
                     <button id="filter-apply" class="btn btn-primary">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Settings Modal -->
+        <div id="settings-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-small">
+                <div class="modal-header">
+                    <h3>Settings</h3>
+                    <button class="btn-close modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <div class="filter-group">
+                        <label>Font Size</label>
+                        <div class="font-size-control">
+                            <input type="range" id="settings-font-size" min="8" max="18" step="1">
+                            <span id="settings-font-size-label">10pt</span>
+                        </div>
+                    </div>
+                    <div class="filter-group">
+                        <label>Owned ml Formats</label>
+                        <div class="checkbox-group" id="settings-owned-formats">
+                            <!-- Populated by JS -->
+                        </div>
+                        <p class="hint">Only checked formats count toward Owned ml</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="settings-reset" class="btn btn-secondary">Reset</button>
+                    <button id="settings-apply" class="btn btn-primary">Apply</button>
                 </div>
             </div>
         </div>
