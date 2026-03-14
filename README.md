@@ -40,6 +40,7 @@ A read-only web version for browsing your collection on any device:
 **Features**:
 - Search, Filter, Sort (mirrors desktop functionality)
 - View Fragrantica data and personal votes
+- Settings (font size, owned ml formats - temporary, resets on refresh)
 - Responsive design for mobile and desktop
 - Real-time sync with your `perfumes.json` data
 
@@ -95,7 +96,7 @@ python perfume_tracker.py
 |--------|----------|
 | Add | Add new perfume (inserts below current selection) |
 | Manage | Manage master data (Brand/Concentration/Location/Tag/Purchase Type) |
-| ⚙ | Settings (font size 6-24pt, with preview) |
+| ⚙ | Settings (font size, owned ml formats) |
 | Sort | Multi-dimensional sorting (button changes color when active) |
 | Filter | Advanced filtering (button changes color when active) |
 | Search | Text search |
@@ -176,7 +177,7 @@ Centralized management of 5 data types; rename once, update everywhere:
 | Location | Dropdown + list display, match any selected location |
 | State | Owned / Smelled / Wishlist multi-select |
 | Season/Time | Spring/Summer/Fall/Winter/Day/Night multi-select |
-| Score | Dual-slider range (min~max), min gap 0.3, Include/Exclude modes |
+| Score | Dual-slider range (min~max), Include/Exclude modes |
 | Gender | Multi-select gender preference |
 | Tags | Dropdown + list display, Match Any (OR) / Match All (AND) |
 | Vote Status | Has personal vote / Has Fragrantica data |
@@ -193,6 +194,7 @@ Centralized management of 5 data types; rename once, update everywhere:
 |-----------|---------|
 | Brand | A→Z / Z→A |
 | Name | A→Z / Z→A |
+| Location | Ascending / Descending (by manage order, supports multi-location) |
 | Rating | High→Low / Low→High |
 | Longevity | High→Low / Low→High |
 | Sillage | High→Low / Low→High |
@@ -223,11 +225,11 @@ Date and Location persist when switching perfumes for batch logging.
 4. The parser extracts vote counts from all 6 dimensions automatically
 
 **6 Rating Dimensions**:
-1. **Rating** - love / like / ok / dislike / hate
-2. **Longevity** - eternal / long / moderate / weak / poor (best on top)
-3. **Sillage** - enormous / strong / moderate / intimate (best on top)
-4. **Gender** - male / more_male / unisex / more_female / female
-5. **Value** - excellent / good / fair / expensive / overpriced (best on top)
+1. **Rating** - love / like / ok / dislike / hate (displays: "4.5 love")
+2. **Longevity** - eternal / long / moderate / weak / poor (displays: "4.2 eternal")
+3. **Sillage** - enormous / strong / moderate / intimate (displays: "3.1 strong")
+4. **Gender** - male / more_male / unisex / more_female / female (displays: ♂──●──♀)
+5. **Value** - excellent / good / fair / expensive / overpriced (displays: "3.8 good")
 6. **When to Wear** - spring / summer / fall / winter / day / night
 
 **Dual-Track Display**:
