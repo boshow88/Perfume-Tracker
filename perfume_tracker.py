@@ -246,6 +246,9 @@ class AppData:
     font_size: int = 10
     # Format names that count toward "Owned ml" (default: full only)
     owned_ml_include_formats: List[str] = field(default_factory=lambda: ["full"])
+    # Where to insert a newly created perfume into the real (manual) order when a sort is active.
+    # Valid values: "below_selected", "append", "sort_view"
+    sort_active_insert_position: str = "below_selected"
 
 
 # Default values for new data types
@@ -502,6 +505,11 @@ def load_app_data() -> AppData:
     # Load font size preference
     app_data.font_size = raw.get("font_size", 10)
     app_data.owned_ml_include_formats = raw.get("owned_ml_include_formats", ["full"])
+    insert_pos = raw.get("sort_active_insert_position", "below_selected")
+    if insert_pos in ("below_selected", "append", "sort_view"):
+        app_data.sort_active_insert_position = insert_pos
+    else:
+        app_data.sort_active_insert_position = "below_selected"
     
     # Load outlets_map (needs special handling for OutletInfo)
     for oid, oinfo in raw.get("outlets_map", {}).items():
@@ -610,6 +618,7 @@ def save_app_data(app_data: AppData):
         "sort_modes": app_data.sort_modes,
         "font_size": app_data.font_size,
         "owned_ml_include_formats": app_data.owned_ml_include_formats,
+        "sort_active_insert_position": app_data.sort_active_insert_position,
     }
     
     with open(DB_PATH, "w", encoding="utf-8") as f:
@@ -3510,7 +3519,7 @@ class SettingsDialog(tk.Toplevel):
         self.transient(parent)
         self.grab_set()
         
-        # Store original values for cancel/restore
+        # Store original values for cancel/restore (only for live-previewed settings)
         self.original_font_size = self.app.font_size
         self.original_owned_ml_formats = list(self.app.app_data.owned_ml_include_formats)
         
@@ -3568,6 +3577,20 @@ class SettingsDialog(tk.Toplevel):
             ttk.Checkbutton(fmt_frame, text=name, variable=var, style="TCheckbutton").pack(anchor="w", padx=(0, 16), pady=2)
         ttk.Label(main, text="(Only checked formats count toward Owned ml)", style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
         
+        # Insert position when sort is active
+        ttk.Label(main, text="Insert position when sort is active:", style="TLabel").pack(anchor="w", pady=(16, 6))
+        self.insert_pos_var = tk.StringVar(value=self.app.app_data.sort_active_insert_position)
+        insert_options = [
+            ("below_selected", "Below selected (default)"),
+            ("append", "Append to end"),
+            ("sort_view", "Match sort view position"),
+        ]
+        for value, label in insert_options:
+            ttk.Radiobutton(main, text=label, variable=self.insert_pos_var, value=value,
+                           style="TRadiobutton").pack(anchor="w", padx=(8, 0), pady=1)
+        ttk.Label(main, text="(Only takes effect when adding a perfume while a sort is active)",
+                 style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
+        
         # Save / Cancel buttons
         btn_frame = ttk.Frame(main, style="TFrame")
         btn_frame.pack(anchor="e", pady=(20, 0))
@@ -3593,6 +3616,9 @@ class SettingsDialog(tk.Toplevel):
         if not self.app.app_data.owned_ml_include_formats:
             names = self.app.get_all_purchase_type_names()
             self.app.app_data.owned_ml_include_formats = [names[0]] if names else ["full"]
+        new_insert_pos = self.insert_pos_var.get()
+        if new_insert_pos in ("below_selected", "append", "sort_view"):
+            self.app.app_data.sort_active_insert_position = new_insert_pos
         self.app.save()
         self.app._refresh_list()
         self.app._on_select()
@@ -3888,6 +3914,18 @@ class App(tk.Tk):
                                      relief="groove", borderwidth=2, padx=6, pady=2)
         self.sort_button.pack(side="right", padx=(0, 4))
         
+        # Reorder buttons (placed left of Sort visually): Lock Order / ↓ / ↑
+        # Pack order: rightmost first → leftmost last
+        self.btn_lock_order = ttk.Button(top_frame, text="Lock Order",
+                                         command=self._lock_order)
+        self.btn_lock_order.pack(side="right", padx=(0, 4))
+        self.btn_move_down = ttk.Button(top_frame, text="↓", width=3,
+                                        command=lambda: self._move_perfume(1))
+        self.btn_move_down.pack(side="right", padx=(0, 2))
+        self.btn_move_up = ttk.Button(top_frame, text="↑", width=3,
+                                      command=lambda: self._move_perfume(-1))
+        self.btn_move_up.pack(side="right", padx=(0, 4))
+        
         # Search entry - packed LAST so it shrinks FIRST when space is tight
         self.var_search = tk.StringVar(value="")
         search_entry = ttk.Entry(top_frame, textvariable=self.var_search)
@@ -3931,6 +3969,16 @@ class App(tk.Tk):
 
         self.tree.bind("<<TreeviewSelect>>", self._on_select)
         self.tree.bind("<Double-1>", lambda e: self.ui_edit_info())
+        
+        # Keyboard shortcuts: Alt+Up / Alt+Down to reorder in manual mode.
+        # Return "break" to prevent the default tree navigation from also firing.
+        def _alt_move(direction):
+            def handler(event=None):
+                self._move_perfume(direction)
+                return "break"
+            return handler
+        self.tree.bind("<Alt-Up>", _alt_move(-1))
+        self.tree.bind("<Alt-Down>", _alt_move(1))
         
         # Right-click on header for column visibility
         self.tree.bind("<Button-3>", self._on_tree_right_click)
@@ -4258,6 +4306,13 @@ class App(tk.Tk):
         else:
             self.sort_button.config(bg=COLORS["panel"], fg=COLORS["text"], relief="groove")
         
+        # Reorder buttons: Up/Down only in manual mode; Lock Order only when sort active
+        if hasattr(self, "btn_move_up"):
+            move_state = "disabled" if has_sort else "normal"
+            self.btn_move_up.config(state=move_state)
+            self.btn_move_down.config(state=move_state)
+            self.btn_lock_order.config(state="normal" if has_sort else "disabled")
+        
         # Check if filter is active (including range filters)
         has_filter = (
             bool(self.filter_config.brands) or
@@ -4291,6 +4346,120 @@ class App(tk.Tk):
             if p.id == pid:
                 return p
         return None
+    
+    def _move_perfume(self, direction: int):
+        """Move selected perfume up (-1) or down (+1) in the manual order.
+        
+        Only operates among visible (filtered) items: hidden items keep their
+        real position, but the selected perfume swaps places with its previous
+        or next visible neighbor.
+        """
+        if self.sort_config.dimensions:
+            return  # Disabled when sort is active
+        
+        sel_id = self._get_selected_id()
+        if not sel_id or not self.filtered_ids:
+            return
+        
+        try:
+            vis_idx = self.filtered_ids.index(sel_id)
+        except ValueError:
+            return
+        
+        target_vis_idx = vis_idx + direction
+        if target_vis_idx < 0 or target_vis_idx >= len(self.filtered_ids):
+            return  # At edge of visible list
+        
+        target_id = self.filtered_ids[target_vis_idx]
+        real_ids = [p.id for p in self.perfumes]
+        try:
+            sel_real = real_ids.index(sel_id)
+            target_real = real_ids.index(target_id)
+        except ValueError:
+            return
+        
+        # Remove selected, then insert relative to target's (possibly shifted) position
+        p = self.perfumes.pop(sel_real)
+        if target_real > sel_real:
+            target_real -= 1
+        insert_at = target_real if direction < 0 else target_real + 1
+        self.perfumes.insert(insert_at, p)
+        
+        self.save()
+        self._refresh_list()
+        # Restore selection
+        try:
+            self.tree.selection_set(sel_id)
+            self.tree.focus(sel_id)
+            self.tree.see(sel_id)
+        except tk.TclError:
+            pass
+    
+    def _insert_new_perfume(self, p: Perfume):
+        """Insert a newly created perfume into the real list.
+        
+        - Sort inactive: insert below currently selected (or append).
+        - Sort active: behavior depends on sort_active_insert_position setting:
+          * "below_selected": same as manual mode (default)
+          * "append": always append to end
+          * "sort_view": real position matches the sort view's position
+        """
+        sort_active = bool(self.sort_config.dimensions)
+        mode = self.app_data.sort_active_insert_position if sort_active else "below_selected"
+        
+        if mode == "append":
+            self.perfumes.append(p)
+            return
+        
+        if mode == "sort_view":
+            # Anchor the new perfume to the perfume directly above it in sort view
+            # (i.e., "below whom"). When sort is cleared later, the new perfume
+            # stays right after that anchor in the manual order.
+            self.perfumes.append(p)
+            sorted_list = self._sort_perfumes(list(self.perfumes), self.sort_config)
+            try:
+                k = sorted_list.index(p)
+            except ValueError:
+                return
+            self.perfumes.remove(p)
+            if k > 0:
+                prev_p = sorted_list[k - 1]
+                prev_real_idx = self.perfumes.index(prev_p)
+                self.perfumes.insert(prev_real_idx + 1, p)
+            else:
+                # New perfume sorts to the very top: place at start of manual order
+                self.perfumes.insert(0, p)
+            return
+        
+        # Default: insert below currently selected
+        selected_pid = self._get_selected_id()
+        insert_idx = len(self.perfumes)
+        if selected_pid:
+            for i, existing in enumerate(self.perfumes):
+                if existing.id == selected_pid:
+                    insert_idx = i + 1
+                    break
+        self.perfumes.insert(insert_idx, p)
+    
+    def _lock_order(self):
+        """Apply current sort to ALL perfumes as the new manual order, then clear sort."""
+        if not self.sort_config.dimensions:
+            return
+        if not messagebox.askyesno(
+            "Lock Order",
+            "This will replace your manual order with the current sort, "
+            "applied to ALL perfumes (filter is ignored).\n\n"
+            "Sort will be cleared afterward. Continue?",
+            parent=self,
+        ):
+            return
+        
+        sorted_all = self._sort_perfumes(list(self.perfumes), self.sort_config)
+        self.perfumes[:] = sorted_all  # Mutate in place to keep self.app_data.perfumes alias valid
+        self.sort_config = SortConfig()
+        self._update_button_states()
+        self.save()
+        self._refresh_list()
 
     def _refresh_list(self):
         # Remember current selection before clearing
@@ -5284,16 +5453,7 @@ class App(tk.Tk):
                 # Create new perfume
                 brand_id = self.find_or_create_brand_id(brand)
                 p = Perfume(id=new_id(), name=name, brand_id=brand_id)
-                
-                # Insert below current selection, or append if none selected
-                selected_pid = self._get_selected_id()
-                insert_idx = len(self.perfumes)  # Default: append to end
-                if selected_pid:
-                    for i, existing in enumerate(self.perfumes):
-                        if existing.id == selected_pid:
-                            insert_idx = i + 1
-                            break
-                self.perfumes.insert(insert_idx, p)
+                self._insert_new_perfume(p)
             else:
                 p = perfume
                 # Update brand and name
@@ -5321,6 +5481,7 @@ class App(tk.Tk):
             if p.id in self.filtered_ids:
                 self.tree.selection_set(p.id)
                 self.tree.focus(p.id)
+                self.tree.see(p.id)  # Scroll into view (important when sort places it far away)
                 self._on_select()
             self.save()
             win.destroy()

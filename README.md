@@ -92,14 +92,19 @@ python perfume_tracker.py
 
 ### Left Panel Buttons
 
+Listed left-to-right as they appear in the toolbar:
+
 | Button | Function |
 |--------|----------|
-| Add | Add new perfume (inserts below current selection) |
+| Add | Add new perfume (insert position depends on sort state and settings) |
 | Manage | Manage master data (Brand/Concentration/Location/Tag/Purchase Type) |
-| ⚙ | Settings (font size, owned ml formats) |
+| ⚙ | Settings (font size, owned ml formats, insert position) |
+| (search box) | Text search |
+| ↑ / ↓ | Move selected perfume up/down in manual order (only when no sort is active; Alt+↑/↓ shortcuts available) |
+| Lock Order | Apply current sort as the new manual order for ALL perfumes (only when sort is active; ignores filter) |
 | Sort | Multi-dimensional sorting (button changes color when active) |
 | Filter | Advanced filtering (button changes color when active) |
-| Search | Text search |
+| Search | Run the text search |
 
 
 ### Right Panel Buttons
@@ -202,7 +207,16 @@ Centralized management of 5 data types; rename once, update everywhere:
 | Price Value | High→Low / Low→High |
 | State | Owned First / Smelled First |
 
-Supports multi-level sorting (e.g., Gender first, then Rating, then Name)
+Supports multi-level sorting (e.g., Gender first, then Rating, then Name).
+
+**Manual Order**:
+- The perfume list has an underlying manual order (your real, persistent order).
+- When no sort is active, the list shows this manual order; use ↑/↓ buttons or Alt+↑/↓ to rearrange.
+  - Reorder operations only swap among visible (filtered) items; hidden items keep their position.
+- When a sort is active, the manual order is preserved silently behind the scenes:
+  - ↑/↓ are disabled; Lock Order becomes available.
+  - Click **Lock Order** to commit the current sort view as the new manual order (applied to ALL perfumes, ignoring filter). Sort is cleared automatically afterward.
+- See Settings for how new perfumes are inserted while a sort is active.
 
 ### 5. Quick Event
 
@@ -260,6 +274,14 @@ Manage in the Memo dialog:
 - Quick title buttons with ⚙ management (add/delete custom titles)
 - Multi-line content with auto-wrap
 - Reorder with ↑/↓ buttons
+
+### 8. Settings (⚙)
+
+| Setting | Description |
+|---------|-------------|
+| Font Size | App-wide font size (live preview, persisted on Save) |
+| Owned ml Formats | Which purchase types count toward the "Owned ml" derived value |
+| Insert position when sort is active | Where a newly added perfume goes in the **real (manual) order** when a sort is active: **Below selected** (default) / **Append to end** / **Match sort view position** |
 
 ---
 
