@@ -160,7 +160,7 @@ Centralized management of 5 data types; rename once, update everywhere:
 **Functions**:
 - **Rename**: Rename once, all linked perfumes update automatically
 - **Merge**: Combine multiple items into one
-- **Delete**: Only unused items can be deleted
+- **Delete**: Unused items deleted with single confirmation; in-use items require two extra confirmations (references will be removed from all linked perfumes/events)
 - **Reorder**: Manually adjust display order (Custom mode only)
 
 **Sort Modes** (persistent, auto-updates on data change):
