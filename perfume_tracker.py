@@ -3544,59 +3544,69 @@ class SettingsDialog(tk.Toplevel):
         main.pack(fill="both", expand=True, padx=20, pady=20)
         
         # Title
-        ttk.Label(main, text="Settings", style="TLabel", font=self.app.font_title).pack(anchor="w", pady=(0, 16))
+        ttk.Label(main, text="Settings", style="TLabel", font=self.app.font_title).pack(anchor="w", pady=(0, 14))
         
-        # Font Size
-        font_frame = ttk.Frame(main, style="TFrame")
-        font_frame.pack(fill="x", pady=(0, 12))
+        # === Section: Font Size (Appearance) ===
+        appearance_frame = ttk.LabelFrame(main, text=" Appearance ", style="TLabelframe")
+        appearance_frame.pack(fill="x", pady=(0, 12), ipadx=8, ipady=6)
         
-        ttk.Label(font_frame, text="Font Size:", style="TLabel").pack(side="left")
-        
+        font_row = ttk.Frame(appearance_frame, style="TFrame")
+        font_row.pack(fill="x", padx=8, pady=(4, 2))
+        ttk.Label(font_row, text="Font Size:", style="TLabel").pack(side="left")
         self.font_var = tk.StringVar(value=str(self.app.font_size))
-        font_combo = ttk.Combobox(font_frame, textvariable=self.font_var, 
+        font_combo = ttk.Combobox(font_row, textvariable=self.font_var, 
                                   values=[str(s) for s in FONT_SIZES],
                                   state="readonly", width=6)
-        font_combo.pack(side="left", padx=(8, 0))
+        font_combo.pack(side="left", padx=(8, 4))
         font_combo.bind("<<ComboboxSelected>>", self._on_font_preview)
+        ttk.Label(font_row, text="pt", style="TLabel").pack(side="left")
+        ttk.Label(font_row, text="(live preview)", style="Muted.TLabel").pack(side="left", padx=(12, 0))
         
-        ttk.Label(font_frame, text="pt", style="TLabel").pack(side="left", padx=(4, 0))
+        # === Section: Owned ml ===
+        owned_frame = ttk.LabelFrame(main, text=" Owned ml Calculation ", style="TLabelframe")
+        owned_frame.pack(fill="x", pady=(0, 12), ipadx=8, ipady=6)
         
-        # Preview hint
-        ttk.Label(main, text="(Changes preview immediately, Save to keep)", 
-                 style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
-        
-        # Owned ml: which formats count
-        ttk.Label(main, text="Formats that count toward Owned ml:", style="TLabel").pack(anchor="w", pady=(16, 6))
-        fmt_frame = ttk.Frame(main, style="TFrame")
-        fmt_frame.pack(fill="x")
+        ttk.Label(owned_frame, text="Formats that count toward Owned ml:",
+                 style="TLabel").pack(anchor="w", padx=8, pady=(4, 4))
+        fmt_grid = ttk.Frame(owned_frame, style="TFrame")
+        fmt_grid.pack(fill="x", padx=16, pady=(0, 4))
         self.owned_ml_format_vars = {}
         included = set(self.app.app_data.owned_ml_include_formats)
-        for name in self.app.get_all_purchase_type_names():
+        for i, name in enumerate(self.app.get_all_purchase_type_names()):
             var = tk.BooleanVar(value=name in included)
             self.owned_ml_format_vars[name] = var
-            ttk.Checkbutton(fmt_frame, text=name, variable=var, style="TCheckbutton").pack(anchor="w", padx=(0, 16), pady=2)
-        ttk.Label(main, text="(Only checked formats count toward Owned ml)", style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
+            row, col = divmod(i, 3)
+            ttk.Checkbutton(fmt_grid, text=name, variable=var,
+                           style="TCheckbutton").grid(row=row, column=col, sticky="w", padx=(0, 24), pady=2)
+        ttk.Label(owned_frame, text="Only checked formats are summed when computing the Owned ml total.",
+                 style="Muted.TLabel").pack(anchor="w", padx=8, pady=(2, 4))
         
-        # Insert position when sort is active
-        ttk.Label(main, text="Insert position when sort is active:", style="TLabel").pack(anchor="w", pady=(16, 6))
+        # === Section: Insert Position ===
+        insert_frame = ttk.LabelFrame(main, text=" New Perfume Insert Position ", style="TLabelframe")
+        insert_frame.pack(fill="x", pady=(0, 12), ipadx=8, ipady=6)
+        
+        ttk.Label(insert_frame, text="When a sort is active, where should a newly added perfume go in the manual order?",
+                 style="TLabel", wraplength=420, justify="left").pack(anchor="w", padx=8, pady=(4, 6))
+        
         self.insert_pos_var = tk.StringVar(value=self.app.app_data.sort_active_insert_position)
         insert_options = [
-            ("below_selected", "Below selected (default)"),
-            ("append", "Append to end"),
-            ("sort_view", "Match sort view position"),
+            ("below_selected", "Below selected", "Default: insert right after the currently selected perfume."),
+            ("append", "Append to end", "Always add to the end of the manual order."),
+            ("sort_view", "Match sort view position", "Place it where the sort visually puts it (anchored below the perfume above it in sort view)."),
         ]
-        for value, label in insert_options:
-            ttk.Radiobutton(main, text=label, variable=self.insert_pos_var, value=value,
-                           style="TRadiobutton").pack(anchor="w", padx=(8, 0), pady=1)
-        ttk.Label(main, text="(Only takes effect when adding a perfume while a sort is active)",
-                 style="Muted.TLabel").pack(anchor="w", pady=(4, 0))
+        for value, label, desc in insert_options:
+            opt_row = ttk.Frame(insert_frame, style="TFrame")
+            opt_row.pack(fill="x", padx=12, pady=(2, 0))
+            ttk.Radiobutton(opt_row, text=label, variable=self.insert_pos_var, value=value,
+                           style="TRadiobutton").pack(anchor="w")
+            ttk.Label(opt_row, text=desc, style="Muted.TLabel",
+                     wraplength=400, justify="left").pack(anchor="w", padx=(24, 0), pady=(0, 2))
         
-        # Save / Cancel buttons
+        # === Save / Cancel buttons ===
         btn_frame = ttk.Frame(main, style="TFrame")
-        btn_frame.pack(anchor="e", pady=(20, 0))
-        
-        ttk.Button(btn_frame, text="Cancel", command=self._on_cancel).pack(side="left", padx=(0, 8))
-        ttk.Button(btn_frame, text="Save", command=self._on_save).pack(side="left")
+        btn_frame.pack(fill="x", pady=(8, 0))
+        ttk.Button(btn_frame, text="Save", command=self._on_save).pack(side="right")
+        ttk.Button(btn_frame, text="Cancel", command=self._on_cancel).pack(side="right", padx=(0, 8))
     
     def _on_font_preview(self, event=None):
         """Preview font size change (don't save yet)"""
@@ -3817,6 +3827,25 @@ class App(tk.Tk):
         self.style.configure("TLabel", background=COLORS["bg"], foreground=COLORS["text"])
         self.style.configure("Panel.TLabel", background=COLORS["panel"], foreground=COLORS["text"])
         self.style.configure("Muted.TLabel", background=COLORS["bg"], foreground=COLORS["muted"])
+        self.style.configure("TLabelframe", background=COLORS["bg"],
+                            bordercolor=COLORS["line"], lightcolor=COLORS["line"],
+                            darkcolor=COLORS["line"])
+        self.style.configure("TLabelframe.Label", background=COLORS["bg"],
+                            foreground=COLORS["muted"])
+        self.style.configure("TCheckbutton", background=COLORS["bg"], foreground=COLORS["text"],
+                            indicatorbackground=COLORS["panel"], indicatorforeground=COLORS["text"])
+        self.style.map("TCheckbutton",
+                      background=[("active", COLORS["bg"])],
+                      foreground=[("active", COLORS["text"]), ("disabled", COLORS["muted"])],
+                      indicatorbackground=[("selected", COLORS["accent"]),
+                                          ("active", COLORS["panel"])])
+        self.style.configure("TRadiobutton", background=COLORS["bg"], foreground=COLORS["text"],
+                            indicatorbackground=COLORS["panel"], indicatorforeground=COLORS["text"])
+        self.style.map("TRadiobutton",
+                      background=[("active", COLORS["bg"])],
+                      foreground=[("active", COLORS["text"]), ("disabled", COLORS["muted"])],
+                      indicatorbackground=[("selected", COLORS["accent"]),
+                                          ("active", COLORS["panel"])])
         self.style.configure("TButton", padding=6)
         self.style.configure("TEntry", fieldbackground=COLORS["panel"], foreground=COLORS["text"], insertcolor="#888888")
         self.style.configure("TCombobox", fieldbackground=COLORS["panel"], foreground=COLORS["text"], insertcolor="#888888")
