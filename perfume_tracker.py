@@ -2448,37 +2448,73 @@ class ManageDataDialog(tk.Toplevel):
             return
         
         selected_ids = [self.item_ids[i] for i in selection]
-        current_map = self._get_current_map()
         
-        used_items = []
-        unused_items = []
+        # Categorize items by usage
+        used_items = []  # (id, name, count)
+        unused_names = []
         for sid in selected_ids:
             usage = self._count_usage(sid)
             name = self._get_item_name(sid)
             if usage > 0:
-                used_items.append(f"{name} ({usage})")
+                used_items.append((sid, name, usage))
             else:
-                unused_items.append(name)
+                unused_names.append(name)
         
+        # Used items: require two confirmations
         if used_items:
-            messagebox.showwarning("Cannot Delete", 
-                f"Still in use:\n\n" + "\n".join(used_items), parent=self)
-            return
+            used_display = "\n".join(f"{name} ({count})" for _, name, count in used_items)
+            if not messagebox.askyesno("Items In Use", 
+                f"The following items are still in use:\n\n{used_display}\n\n"
+                "Do you still want to delete them?", parent=self):
+                return
+            
+            total_refs = sum(count for _, _, count in used_items)
+            if not messagebox.askyesno("Final Confirmation", 
+                f"WARNING: This will remove {total_refs} reference(s) from your data.\n\n"
+                "Are you REALLY sure you want to proceed?", parent=self):
+                return
+            
+            for sid, _, _ in used_items:
+                self._remove_references(sid)
         
-        if not unused_items:
-            return
+        # Unused items only: single confirmation
+        elif unused_names:
+            if not messagebox.askyesno("Confirm Delete", 
+                f"Delete {len(unused_names)} items?\n\n" + "\n".join(unused_names), parent=self):
+                return
         
-        if not messagebox.askyesno("Confirm Delete", 
-            f"Delete {len(unused_items)} items?\n\n" + "\n".join(unused_items), parent=self):
-            return
-        
+        # Delete from map
+        current_map = self._get_current_map()
         for sid in selected_ids:
-            if self._count_usage(sid) == 0:
-                del current_map[sid]
+            current_map.pop(sid, None)
         
         self.app.save()
         self._refresh_list()
-        self.app._refresh_list()  # Refresh main list but dialog stays open
+        self.app._refresh_list()
+    
+    def _remove_references(self, item_id: str):
+        """Remove all references to this item from perfumes/events"""
+        if self.current_tab == "brands":
+            for p in self.app.perfumes:
+                if p.brand_id == item_id:
+                    p.brand_id = ""
+        elif self.current_tab == "concentrations":
+            for p in self.app.perfumes:
+                if p.concentration_id == item_id:
+                    p.concentration_id = ""
+        elif self.current_tab == "outlets":
+            for p in self.app.perfumes:
+                if item_id in p.outlet_ids:
+                    p.outlet_ids.remove(item_id)
+        elif self.current_tab == "tags":
+            for p in self.app.perfumes:
+                if item_id in p.tag_ids:
+                    p.tag_ids.remove(item_id)
+        elif self.current_tab == "purchase_types":
+            for p in self.app.perfumes:
+                for e in p.events:
+                    if e.purchase_type_id == item_id:
+                        e.purchase_type_id = ""
     
     def _add_new(self):
         if self.current_tab == "outlets":
