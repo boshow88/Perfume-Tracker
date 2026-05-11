@@ -125,6 +125,7 @@
                             <option value="name">Name</option>
                             <option value="location">Location</option>
                             <option value="concentration">Concentration</option>
+                            <option value="year">Year</option>
                             <option value="state">State</option>
                             <option value="rating">Rating</option>
                             <option value="longevity">Longevity</option>
@@ -248,6 +249,21 @@
                                 </div>
                             </div>
                         </div>
+                    </div>
+                    <!-- Year Range Filter -->
+                    <div class="filter-group">
+                        <label>Year Range</label>
+                        <div class="year-range-filter">
+                            <label class="year-input-label">
+                                From:
+                                <input type="number" id="filter-year-min" placeholder="—" min="0" step="1">
+                            </label>
+                            <label class="year-input-label">
+                                To:
+                                <input type="number" id="filter-year-max" placeholder="—" min="0" step="1">
+                            </label>
+                        </div>
+                        <p class="hint">Leave empty for no bound. Perfumes without a year are excluded when this filter is active.</p>
                     </div>
                     <!-- Season/Time Filter -->
                     <div class="filter-group">

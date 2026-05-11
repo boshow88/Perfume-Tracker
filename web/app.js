@@ -51,7 +51,10 @@ let filters = {
     rating: { min: 0, max: 5, exclude: false },
     longevity: { min: 0, max: 5, exclude: false },
     sillage: { min: 0, max: 4, exclude: false },
-    value: { min: 0, max: 5, exclude: false }
+    value: { min: 0, max: 5, exclude: false },
+    // Year range: 0 means no bound on that side
+    yearMin: 0,
+    yearMax: 0
 };
 
 // Multi-level sort: array of {field, ascending}
@@ -313,6 +316,12 @@ function getSortValue(p, field, ascending = true) {
         case 'concentration':
             // Use map order (user's custom order from desktop)
             return getMapIndex(concentrationsMap, p.concentration_id);
+        case 'year': {
+            const y = parseInt(p.year, 10) || 0;
+            // Unset year (0) sorts to the end in either direction
+            if (y <= 0) return ascending ? Infinity : -Infinity;
+            return y;
+        }
         case 'state':
             return getStatePriority(p);
         case 'rating':
@@ -435,6 +444,8 @@ function renderPerfumeList() {
     container.innerHTML = filteredPerfumes.map(p => {
         const brand = brandsMap[p.brand_id] || 'Unknown';
         const conc = concentrationsMap[p.concentration_id] || '';
+        const year = parseInt(p.year, 10) || 0;
+        const concYear = [conc, year > 0 ? String(year) : ''].filter(Boolean).join(' · ');
         const locations = (p.outlet_ids || [])
             .map(id => outletsMap[id]?.name || '')
             .filter(Boolean)
@@ -445,7 +456,7 @@ function renderPerfumeList() {
                  data-id="${p.id}">
                 <span class="brand">${escapeHtml(brand)}</span>
                 <span class="name">${escapeHtml(p.name)}</span>
-                <span class="concentration">${escapeHtml(conc)}</span>
+                <span class="concentration">${escapeHtml(concYear)}</span>
                 <span class="locations">${escapeHtml(locations)}</span>
             </div>
         `;
@@ -477,8 +488,10 @@ function renderDetailPanel(p) {
     
     const brand = brandsMap[p.brand_id] || 'Unknown';
     const conc = concentrationsMap[p.concentration_id] || '';
+    const year = parseInt(p.year, 10) || 0;
     document.getElementById('detail-brand').textContent = brand;
-    document.getElementById('detail-name-conc').textContent = conc ? `${p.name} · ${conc}` : p.name;
+    const subtitleParts = [p.name, conc, year > 0 ? String(year) : ''].filter(Boolean);
+    document.getElementById('detail-name-conc').textContent = subtitleParts.join(' · ');
     
     const state = deriveState(p);
     document.getElementById('detail-state').textContent = state;
@@ -889,6 +902,14 @@ function applyFiltersAndSort() {
             if (!hasLocation) return false;
         }
         
+        // Year range filter (active when either bound > 0; unset years excluded)
+        if (filters.yearMin > 0 || filters.yearMax > 0) {
+            const py = parseInt(p.year, 10) || 0;
+            if (py <= 0) return false;
+            if (filters.yearMin > 0 && py < filters.yearMin) return false;
+            if (filters.yearMax > 0 && py > filters.yearMax) return false;
+        }
+        
         if (filters.tags.length > 0) {
             const pTagIds = new Set(p.tag_ids || []);
             if (filters.tagsLogic === 'and') {
@@ -935,6 +956,7 @@ const SORT_FIELD_LABELS = {
     name: 'Name',
     location: 'Location',
     concentration: 'Concentration',
+    year: 'Year',
     state: 'State',
     rating: 'Rating',
     longevity: 'Longevity',
@@ -1259,6 +1281,10 @@ function openFilterModal() {
     setSelectValues('filter-location', filters.locations);
     setSelectValues('filter-tag', filters.tags);
     
+    // Restore year range entries
+    document.getElementById('filter-year-min').value = filters.yearMin > 0 ? String(filters.yearMin) : '';
+    document.getElementById('filter-year-max').value = filters.yearMax > 0 ? String(filters.yearMax) : '';
+    
     // Restore tags logic
     document.querySelectorAll('input[name="tags-logic"]').forEach(radio => {
         radio.checked = (radio.value === filters.tagsLogic);
@@ -1303,6 +1329,12 @@ function applyFilters() {
     filters.locations = getSelectValues('filter-location');
     filters.tags = getSelectValues('filter-tag');
     
+    // Year range
+    const yMin = parseInt(document.getElementById('filter-year-min').value, 10);
+    const yMax = parseInt(document.getElementById('filter-year-max').value, 10);
+    filters.yearMin = Number.isFinite(yMin) && yMin > 0 ? yMin : 0;
+    filters.yearMax = Number.isFinite(yMax) && yMax > 0 ? yMax : 0;
+    
     // Get tags logic
     const selectedLogic = document.querySelector('input[name="tags-logic"]:checked');
     filters.tagsLogic = selectedLogic ? selectedLogic.value : 'or';
@@ -1327,7 +1359,9 @@ function clearFilters() {
         rating: { min: 0, max: 5, exclude: false },
         longevity: { min: 0, max: 5, exclude: false },
         sillage: { min: 0, max: 4, exclude: false },
-        value: { min: 0, max: 5, exclude: false }
+        value: { min: 0, max: 5, exclude: false },
+        yearMin: 0,
+        yearMax: 0
     };
     
     // Clear state checkboxes
@@ -1355,6 +1389,10 @@ function clearFilters() {
         const select = document.getElementById(id);
         Array.from(select.options).forEach(opt => opt.selected = false);
     });
+    
+    // Reset year range entries
+    document.getElementById('filter-year-min').value = '';
+    document.getElementById('filter-year-max').value = '';
     
     // Reset tags logic to OR
     document.querySelectorAll('input[name="tags-logic"]').forEach(radio => {
@@ -1425,6 +1463,8 @@ function updateFilterButtonState() {
                        filters.concentrations.length > 0 || 
                        filters.locations.length > 0 || 
                        filters.tags.length > 0 ||
+                       filters.yearMin > 0 ||
+                       filters.yearMax > 0 ||
                        hasScoreFilter;
     btn.classList.toggle('active', hasFilters);
 }

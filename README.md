@@ -119,14 +119,15 @@ Listed left-to-right as they appear in the toolbar:
 
 ### Treeview Columns
 - **Always visible**: Brand, Name
-- **Toggleable**: Concentration, Location
-- Right-click on header to toggle column visibility
+- **Toggleable**: Concentration, Year (hidden by default), Location
+- Toggle via either: **right-click on header**, or **Settings → Columns**
+- Visibility is persistent (stored in `perfumes.json`)
 - Double-click a perfume to open the Info edit dialog
 - **Hover tooltip**: Hover on any cell to see full content (useful for truncated text)
 
 ### Right Panel Detail
 - **Brand**: Displayed as title (first line), hover for full text
-- **Name · Concentration**: Displayed as subtitle (e.g., "Sauvage · EdP"), hover for full text
+- **Name · Concentration · Year**: Displayed as subtitle (e.g., "Sauvage · EdP · 2015"). Year omitted if unset.
 - **State**: Displayed as gray text (e.g., "Owned", "Smelled")
 - **Tags**: Displayed as gray text, click to expand popup with full tag list
 - **Links**: Click to open, hover for full URL
@@ -183,6 +184,7 @@ Centralized management of 5 data types; rename once, update everywhere:
 | State | Owned / Smelled / Wishlist multi-select |
 | Season/Time | Spring/Summer/Fall/Winter/Day/Night multi-select |
 | Score | Dual-slider range (min~max), Include/Exclude modes |
+| Year | From / To entries; leave empty for no bound. Perfumes without a year are excluded when active. |
 | Gender | Multi-select gender preference |
 | Tags | Dropdown + list display, Match Any (OR) / Match All (AND) |
 | Vote Status | Has personal vote / Has Fragrantica data |
@@ -200,6 +202,7 @@ Centralized management of 5 data types; rename once, update everywhere:
 | Brand | A→Z / Z→A |
 | Name | A→Z / Z→A |
 | Location | Ascending / Descending (by manage order, supports multi-location) |
+| Year | Ascending (old→new) / Descending (new→old); perfumes without a year sort to the end |
 | Rating | High→Low / Low→High |
 | Longevity | High→Low / Low→High |
 | Sillage | High→Low / Low→High |
@@ -280,7 +283,9 @@ Manage in the Memo dialog:
 | Setting | Description |
 |---------|-------------|
 | Font Size | App-wide font size (live preview, persisted on Save) |
+| Columns | Show / hide the optional Treeview columns (Concentration, Year, Location). Also toggleable via right-click on the column headers. |
 | Owned ml Formats | Which purchase types count toward the "Owned ml" derived value |
+| Auto-detect year on Fragrantica import | When enabled, attempts to extract the release year from imported Fragrantica text. New perfumes get their year set automatically; existing year values trigger a confirmation before overwrite. |
 | Insert position when sort is active | Where a newly added perfume goes in the **real (manual) order** when a sort is active: **Below selected** (default) / **Append to end** / **Match sort view position** |
 
 ---
@@ -297,6 +302,7 @@ class Perfume:
     concentration_id: str      # → concentrations_map
     outlet_ids: List[str]      # → outlets_map (multiple)
     tag_ids: List[str]         # → tags_map (multiple)
+    year: int                  # Release year (0 = unset)
     created_at: int            # Creation timestamp
     updated_at: int            # Update timestamp
     events: List[Event]

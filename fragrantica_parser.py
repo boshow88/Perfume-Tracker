@@ -4,6 +4,7 @@ Extracts vote data from Ctrl+A Ctrl+C raw text content.
 """
 
 import re
+from datetime import datetime
 from typing import Dict, Optional, Tuple
 
 # =============================================================================
@@ -131,6 +132,28 @@ def _extract_simple_options(lines: list, start_idx: int, options: list) -> Dict[
     """
     option_map = {opt: opt for opt in options}
     return _extract_option_value(lines, start_idx, option_map)
+
+
+def extract_launch_year(text: str) -> Optional[int]:
+    """
+    Extract perfume launch year from the page description paragraph.
+    
+    Looks for patterns like:
+      - "X was launched in 2022."  -> returns 2022
+      - "X was launched during the 2020's."  -> returns None (decade is too vague)
+    
+    Only specific years are returned. Sanity-checked against 1700..current_year+1.
+    Returns None if no reliable match.
+    """
+    # Specific year pattern; case-insensitive, allow extra whitespace.
+    m = re.search(r"\blaunched\s+in\s+(\d{4})\b", text, re.IGNORECASE)
+    if not m:
+        return None
+    year = int(m.group(1))
+    current = datetime.now().year
+    if 1700 <= year <= current + 1:
+        return year
+    return None
 
 
 # =============================================================================

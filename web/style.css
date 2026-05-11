@@ -972,6 +972,43 @@ body {
     gap: var(--space-md);
 }
 
+.year-range-filter {
+    display: flex;
+    gap: var(--space-md);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+.year-input-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    font-size: 0.9rem;
+    color: var(--text-secondary, var(--text-color));
+}
+
+.year-input-label input[type="number"] {
+    width: 6em;
+    padding: 4px 6px;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-color);
+    font-family: inherit;
+}
+
+/* Remove number input spinners for a cleaner look */
+.year-input-label input[type="number"]::-webkit-inner-spin-button,
+.year-input-label input[type="number"]::-webkit-outer-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
+.year-input-label input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
 .score-filter-item {
     background: var(--bg-card);
     border: 1px solid var(--border-color);

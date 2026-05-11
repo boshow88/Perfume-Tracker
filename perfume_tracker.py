@@ -25,7 +25,7 @@ from typing import Dict, List, Optional, Tuple
 import tkinter as tk
 
 # Local modules
-from fragrantica_parser import parse_fragrantica_text
+from fragrantica_parser import parse_fragrantica_text, extract_launch_year
 from tkinter import ttk, messagebox, simpledialog, font as tkfont
 
 
@@ -125,6 +125,12 @@ class SortConfig:
     # order: "asc", "desc", "female_first", "male_first", "unisex_first", etc.
 
 
+def _parse_year_str(s: str) -> int:
+    """Parse a year string into int. Empty / non-numeric -> 0 (no bound)."""
+    s = (s or "").strip()
+    return int(s) if s.isdigit() else 0
+
+
 @dataclass
 class FilterConfig:
     """Filter configuration"""
@@ -152,6 +158,10 @@ class FilterConfig:
     tags_logic: str = "or"  # "or" or "and"
     has_my_vote: bool = False
     has_fragrantica: bool = False
+    # Year range: 0 means "no lower/upper bound". Filter is active when either is > 0.
+    # When active, perfumes with year=0 (unset) are excluded.
+    year_min: int = 0
+    year_max: int = 0
 
 
 @dataclass
@@ -201,7 +211,9 @@ class Perfume:
     concentration_id: str = ""
     outlet_ids: List[str] = field(default_factory=list)
     tag_ids: List[str] = field(default_factory=list)
-    
+    # Release year (0 = unset)
+    year: int = 0
+
     created_at: int = field(default_factory=now_ts)
     updated_at: int = field(default_factory=now_ts)
 
@@ -249,6 +261,14 @@ class AppData:
     # Where to insert a newly created perfume into the real (manual) order when a sort is active.
     # Valid values: "below_selected", "append", "sort_view"
     sort_active_insert_position: str = "below_selected"
+    # When importing Fragrantica text, attempt to auto-detect the release year.
+    import_year_from_fragrantica: bool = True
+    # Treeview optional column visibility (Brand/Name are always shown and not stored here)
+    column_visibility: Dict[str, bool] = field(default_factory=lambda: {
+        "concentration": True,
+        "year": False,
+        "locations": True,
+    })
 
 
 # Default values for new data types
@@ -510,6 +530,15 @@ def load_app_data() -> AppData:
         app_data.sort_active_insert_position = insert_pos
     else:
         app_data.sort_active_insert_position = "below_selected"
+    app_data.import_year_from_fragrantica = bool(raw.get("import_year_from_fragrantica", True))
+    
+    # Column visibility (merge with defaults so new optional columns get sensible defaults)
+    saved_cv = raw.get("column_visibility", {}) or {}
+    defaults_cv = {"concentration": True, "year": False, "locations": True}
+    app_data.column_visibility = {
+        col: bool(saved_cv[col]) if col in saved_cv else default
+        for col, default in defaults_cv.items()
+    }
     
     # Load outlets_map (needs special handling for OutletInfo)
     for oid, oinfo in raw.get("outlets_map", {}).items():
@@ -533,6 +562,7 @@ def load_app_data() -> AppData:
             concentration_id=p_raw.get("concentration_id", ""),
             outlet_ids=p_raw.get("outlet_ids", []),
             tag_ids=p_raw.get("tag_ids", []),
+            year=int(p_raw.get("year", 0) or 0),
             created_at=p_raw.get("created_at", now_ts()),
             updated_at=p_raw.get("updated_at", now_ts()),
             events=events,
@@ -619,6 +649,8 @@ def save_app_data(app_data: AppData):
         "font_size": app_data.font_size,
         "owned_ml_include_formats": app_data.owned_ml_include_formats,
         "sort_active_insert_position": app_data.sort_active_insert_position,
+        "import_year_from_fragrantica": app_data.import_year_from_fragrantica,
+        "column_visibility": app_data.column_visibility,
     }
     
     with open(DB_PATH, "w", encoding="utf-8") as f:
@@ -1337,6 +1369,7 @@ class SortDialog(tk.Toplevel):
         ("brand", "Brand"),
         ("name", "Name"),
         ("location", "Location"),
+        ("year", "Year"),
         ("rating", "Rating"),
         ("longevity", "Longevity"),
         ("sillage", "Sillage"),
@@ -2594,6 +2627,8 @@ class FilterDialog(tk.Toplevel):
         self.var_tags_logic = tk.StringVar(value=current_config.tags_logic)
         self.var_has_my_vote = tk.BooleanVar(value=current_config.has_my_vote)
         self.var_has_fragrantica = tk.BooleanVar(value=current_config.has_fragrantica)
+        self.var_year_min = tk.StringVar(value=str(current_config.year_min) if current_config.year_min > 0 else "")
+        self.var_year_max = tk.StringVar(value=str(current_config.year_max) if current_config.year_max > 0 else "")
         self.tags_selected = list(current_config.tags)
         
         self._build_ui()
@@ -2678,6 +2713,9 @@ class FilterDialog(tk.Toplevel):
         
         # Scores
         self._create_collapsible_section(content, "Scores & Values", "scores", self._create_scores_section)
+        
+        # Year Range
+        self._create_collapsible_section(content, "Year Range", "year", self._create_year_section)
         
         # Gender
         self._create_collapsible_section(content, "Gender Preference", "gender", self._create_gender_section)
@@ -2807,6 +2845,11 @@ class FilterDialog(tk.Toplevel):
             lines.append("• Perfumes I've voted on")
         if self.current_config.has_fragrantica:
             lines.append("• Perfumes with Fragrantica data")
+        
+        if self.current_config.year_min > 0 or self.current_config.year_max > 0:
+            lo = self.current_config.year_min if self.current_config.year_min > 0 else "—"
+            hi = self.current_config.year_max if self.current_config.year_max > 0 else "—"
+            lines.append(f"• Year: {lo} ~ {hi}")
         
         return "\n".join(lines)
     
@@ -3218,6 +3261,27 @@ class FilterDialog(tk.Toplevel):
             for tag in self.tags_selected:
                 self.tags_listbox.insert("end", tag)
     
+    def _create_year_section(self, parent):
+        """Create year range filter with From / To entries."""
+        row = ttk.Frame(parent, style="Panel.TFrame")
+        row.pack(fill="x", pady=4)
+        
+        ttk.Label(row, text="From:", style="Panel.TLabel").pack(side="left")
+        year_min_entry = ttk.Entry(row, textvariable=self.var_year_min, width=6)
+        year_min_entry.pack(side="left", padx=(4, 12))
+        
+        ttk.Label(row, text="To:", style="Panel.TLabel").pack(side="left")
+        year_max_entry = ttk.Entry(row, textvariable=self.var_year_max, width=6)
+        year_max_entry.pack(side="left", padx=(4, 0))
+        
+        # Trigger recount when either entry changes
+        self.var_year_min.trace_add("write", lambda *_: self._update_result_count())
+        self.var_year_max.trace_add("write", lambda *_: self._update_result_count())
+        
+        ttk.Label(parent,
+                 text="Leave empty for no bound. Perfumes without a year are excluded when this filter is active.",
+                 style="Muted.TLabel", wraplength=480, justify="left").pack(anchor="w", padx=4, pady=(4, 0))
+    
     def _create_vote_status_section(self, parent):
         """Create vote status checkboxes in a single row"""
         status_frame = ttk.Frame(parent, style="Panel.TFrame")
@@ -3319,6 +3383,8 @@ class FilterDialog(tk.Toplevel):
             tags_logic=self.var_tags_logic.get(),
             has_my_vote=self.var_has_my_vote.get(),
             has_fragrantica=self.var_has_fragrantica.get(),
+            year_min=_parse_year_str(self.var_year_min.get()),
+            year_max=_parse_year_str(self.var_year_max.get()),
         )
     
     def _count_matches(self, config: FilterConfig) -> int:
@@ -3447,6 +3513,16 @@ class FilterDialog(tk.Toplevel):
             if not p.fragrantica or not any(p.fragrantica.values()):
                 return False
         
+        # Year range
+        if config.year_min > 0 or config.year_max > 0:
+            py = getattr(p, "year", 0) or 0
+            if py <= 0:
+                return False
+            if config.year_min > 0 and py < config.year_min:
+                return False
+            if config.year_max > 0 and py > config.year_max:
+                return False
+        
         return True
     
     def _clear_all(self):
@@ -3483,6 +3559,8 @@ class FilterDialog(tk.Toplevel):
         self.var_tags_logic.set("or")
         self.var_has_my_vote.set(False)
         self.var_has_fragrantica.set(False)
+        self.var_year_min.set("")
+        self.var_year_max.set("")
         self._update_result_count()
         self._update_active_text()
     
@@ -3562,6 +3640,24 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(font_row, text="pt", style="TLabel").pack(side="left")
         ttk.Label(font_row, text="(live preview)", style="Muted.TLabel").pack(side="left", padx=(12, 0))
         
+        # === Section: Columns ===
+        columns_frame = ttk.LabelFrame(main, text=" Columns ", style="TLabelframe")
+        columns_frame.pack(fill="x", pady=(0, 12), ipadx=8, ipady=6)
+        
+        ttk.Label(columns_frame, text="Optional columns shown in the list:",
+                 style="TLabel").pack(anchor="w", padx=8, pady=(4, 4))
+        col_grid = ttk.Frame(columns_frame, style="TFrame")
+        col_grid.pack(fill="x", padx=16, pady=(0, 4))
+        self.column_vis_vars = {}
+        cv = self.app.app_data.column_visibility
+        for i, (col_id, col_name) in enumerate(self.app.OPTIONAL_COLUMNS):
+            var = tk.BooleanVar(value=cv.get(col_id, True))
+            self.column_vis_vars[col_id] = var
+            ttk.Checkbutton(col_grid, text=col_name, variable=var,
+                           style="TCheckbutton").grid(row=0, column=i, sticky="w", padx=(0, 24), pady=2)
+        ttk.Label(columns_frame, text="Brand and Name are always visible.",
+                 style="Muted.TLabel").pack(anchor="w", padx=8, pady=(2, 4))
+        
         # === Section: Owned ml ===
         owned_frame = ttk.LabelFrame(main, text=" Owned ml Calculation ", style="TLabelframe")
         owned_frame.pack(fill="x", pady=(0, 12), ipadx=8, ipady=6)
@@ -3580,6 +3676,19 @@ class SettingsDialog(tk.Toplevel):
                            style="TCheckbutton").grid(row=row, column=col, sticky="w", padx=(0, 24), pady=2)
         ttk.Label(owned_frame, text="Only checked formats are summed when computing the Owned ml total.",
                  style="Muted.TLabel").pack(anchor="w", padx=8, pady=(2, 4))
+        
+        # === Section: Fragrantica Import ===
+        import_frame = ttk.LabelFrame(main, text=" Fragrantica Import ", style="TLabelframe")
+        import_frame.pack(fill="x", pady=(0, 12), ipadx=8, ipady=6)
+        
+        self.import_year_var = tk.BooleanVar(value=self.app.app_data.import_year_from_fragrantica)
+        ttk.Checkbutton(import_frame, text="Auto-detect year on import",
+                       variable=self.import_year_var,
+                       style="TCheckbutton").pack(anchor="w", padx=8, pady=(4, 2))
+        ttk.Label(import_frame,
+                 text="When importing Fragrantica text, attempt to extract the release year. "
+                      "Existing year values will only be overwritten after confirmation.",
+                 style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w", padx=8, pady=(0, 4))
         
         # === Section: Insert Position ===
         insert_frame = ttk.LabelFrame(main, text=" New Perfume Insert Position ", style="TLabelframe")
@@ -3629,6 +3738,11 @@ class SettingsDialog(tk.Toplevel):
         new_insert_pos = self.insert_pos_var.get()
         if new_insert_pos in ("below_selected", "append", "sort_view"):
             self.app.app_data.sort_active_insert_position = new_insert_pos
+        self.app.app_data.import_year_from_fragrantica = self.import_year_var.get()
+        # Column visibility
+        for col_id, var in self.column_vis_vars.items():
+            self.app.app_data.column_visibility[col_id] = var.get()
+        self.app._update_treeview_columns()
         self.app.save()
         self.app._refresh_list()
         self.app._on_select()
@@ -3965,15 +4079,9 @@ class App(tk.Tk):
         tree_frame = ttk.Frame(left, style="Panel.TFrame")
         tree_frame.pack(fill="both", expand=True, padx=8, pady=4)
         
-        # Column configuration (brand, name required; others optional)
-        self.column_visibility = {
-            "brand": True,      # Required, cannot hide
-            "name": True,       # Required, cannot hide
-            "concentration": True,
-            "locations": True,
-        }
-        
-        all_columns = ("brand", "name", "concentration", "locations")
+        # Column configuration. Brand/Name are required and always visible.
+        # Optional columns are stored in AppData.column_visibility (persistent).
+        all_columns = ("brand", "name", "concentration", "year", "locations")
         self.tree = ttk.Treeview(
             tree_frame,
             columns=all_columns,
@@ -3984,11 +4092,13 @@ class App(tk.Tk):
         self.tree.heading("brand", text="Brand")
         self.tree.heading("name", text="Name")
         self.tree.heading("concentration", text="Conc.")
+        self.tree.heading("year", text="Year")
         self.tree.heading("locations", text="Location")
         
         self.tree.column("brand", width=80, anchor="w")
         self.tree.column("name", width=240, anchor="w")
         self.tree.column("concentration", width=60, stretch=False, anchor="w")
+        self.tree.column("year", width=50, stretch=False, anchor="center")
         self.tree.column("locations", width=100, anchor="w")
 
         yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
@@ -4014,6 +4124,9 @@ class App(tk.Tk):
         
         # Tooltip for treeview cells
         self.tree_tooltip = TreeviewTooltip(self.tree)
+        
+        # Apply initial column visibility (year is hidden by default)
+        self._update_treeview_columns()
 
         # Update button states
         self._update_button_states()
@@ -4357,7 +4470,9 @@ class App(tk.Tk):
             bool(self.filter_config.gender_preference) or
             bool(self.filter_config.tags) or
             self.filter_config.has_my_vote or
-            self.filter_config.has_fragrantica
+            self.filter_config.has_fragrantica or
+            self.filter_config.year_min > 0 or
+            self.filter_config.year_max > 0
         )
         if has_filter:
             self.filter_button.config(bg=COLORS["accent"], fg=COLORS["bg"], relief="solid")
@@ -4536,11 +4651,12 @@ class App(tk.Tk):
             # Get locations (Available At)
             locations_display = ", ".join(self.get_outlet_display(oid) for oid in p.outlet_ids) if p.outlet_ids else ""
             
+            year_display = str(p.year) if getattr(p, "year", 0) else ""
             self.tree.insert(
                 "",
                 "end",
                 iid=p.id,
-                values=(brand_display, p.name, conc_display, locations_display),
+                values=(brand_display, p.name, conc_display, year_display, locations_display),
             )
             ids.append(p.id)
         
@@ -4694,6 +4810,16 @@ class App(tk.Tk):
             if not p.fragrantica or not any(p.fragrantica.values()):
                 return False
         
+        # Year range (active when either bound > 0; unset years are excluded)
+        if config.year_min > 0 or config.year_max > 0:
+            py = getattr(p, "year", 0) or 0
+            if py <= 0:
+                return False
+            if config.year_min > 0 and py < config.year_min:
+                return False
+            if config.year_max > 0 and py > config.year_max:
+                return False
+        
         return True
     
     def _sort_perfumes(self, perfumes: List[Perfume], config: SortConfig) -> List[Perfume]:
@@ -4742,6 +4868,12 @@ class App(tk.Tk):
                 # Use negative to reverse order, fewer locations = higher priority
                 sorted_desc = tuple(sorted(indices, reverse=True))
                 return tuple(-i for i in sorted_desc)
+        
+        elif dimension == "year":
+            y = getattr(p, "year", 0) or 0
+            if y <= 0:
+                return (float('inf'),)
+            return (-y,) if order == "desc" else (y,)
         
         elif dimension == "rating":
             fr = (p.fragrantica or {}).get("rating_votes", {})
@@ -4803,12 +4935,14 @@ class App(tk.Tk):
         self.detail_title.config(text=brand_text)
         self.detail_title_tooltip.set_text(brand_text)
         
-        # Line 2: Name · Concentration
+        # Line 2: Name · Concentration · Year
         conc_name = self.get_concentration_name(p.concentration_id)
+        parts = [p.name]
         if conc_name:
-            name_conc_text = f"{p.name} · {conc_name}"
-        else:
-            name_conc_text = p.name
+            parts.append(conc_name)
+        if getattr(p, "year", 0):
+            parts.append(str(p.year))
+        name_conc_text = " · ".join(parts)
         self.name_conc_label.config(text=name_conc_text)
         self.name_conc_tooltip.set_text(name_conc_text)
         
@@ -5137,35 +5271,80 @@ class App(tk.Tk):
                 self._on_select()
                 self.menu.tk_popup(evt.x_root, evt.y_root)
     
+    # Optional Treeview columns (Brand/Name are required and always visible)
+    OPTIONAL_COLUMNS = [
+        ("concentration", "Concentration"),
+        ("year", "Year"),
+        ("locations", "Location"),
+    ]
+
     def _show_column_menu(self, evt):
         """Show menu to toggle column visibility"""
         menu = tk.Menu(self, tearoff=0)
-        
-        # Add checkboxes for optional columns (not brand/name)
-        optional_cols = [
-            ("concentration", "Concentration"),
-            ("locations", "Location"),
-        ]
-        
-        for col_id, col_name in optional_cols:
-            var = tk.BooleanVar(value=self.column_visibility.get(col_id, True))
+        cv = self.app_data.column_visibility
+        for col_id, col_name in self.OPTIONAL_COLUMNS:
+            var = tk.BooleanVar(value=cv.get(col_id, True))
             menu.add_checkbutton(
                 label=col_name,
                 variable=var,
                 command=lambda c=col_id, v=var: self._toggle_column(c, v.get())
             )
-        
         menu.tk_popup(evt.x_root, evt.y_root)
-    
+
     def _toggle_column(self, column: str, visible: bool):
-        """Toggle column visibility"""
-        self.column_visibility[column] = visible
+        """Toggle column visibility (persisted to JSON)"""
+        self.app_data.column_visibility[column] = visible
         self._update_treeview_columns()
+        self.save()
+
+    # Baseline widths for stretchable columns, used as relative proportions
+    # when redistributing space. Fixed-width columns are listed separately.
+    _COL_FIXED_WIDTHS = {"concentration": 60, "year": 50}
+    _COL_STRETCH_PROPORTIONS = {"brand": 1.0, "name": 3.0, "locations": 1.2}
     
     def _update_treeview_columns(self):
-        """Update treeview to show/hide columns based on visibility settings"""
-        visible_cols = [col for col, vis in self.column_visibility.items() if vis]
+        """Update treeview to show/hide columns based on visibility settings,
+        then redistribute widths so the layout fills the available space
+        cleanly (no gap, no overflow). tkinter does not auto-redistribute
+        stretchable columns when ``displaycolumns`` changes.
+        """
+        cv = self.app_data.column_visibility
+        visible_cols = ["brand", "name"]
+        for col_id, _ in self.OPTIONAL_COLUMNS:
+            if cv.get(col_id, True):
+                visible_cols.append(col_id)
         self.tree["displaycolumns"] = visible_cols
+        self._redistribute_tree_columns(visible_cols)
+    
+    def _redistribute_tree_columns(self, visible_cols: List[str]):
+        """Re-balance column widths so stretchable columns share the remaining
+        space proportionally, after fixed-width columns are accounted for."""
+        try:
+            self.tree.update_idletasks()
+            total_width = self.tree.winfo_width()
+            if total_width <= 1:
+                # Widget not realized yet; initial paint will use the widths
+                # set at column creation time.
+                return
+            
+            # Reserve a small amount for the vertical scrollbar
+            SCROLLBAR_RESERVE = 18
+            available = max(total_width - SCROLLBAR_RESERVE, 200)
+            
+            fixed_sum = sum(self._COL_FIXED_WIDTHS.get(c, 0)
+                            for c in visible_cols if c in self._COL_FIXED_WIDTHS)
+            stretchy_cols = [c for c in visible_cols if c not in self._COL_FIXED_WIDTHS]
+            prop_total = sum(self._COL_STRETCH_PROPORTIONS.get(c, 1.0) for c in stretchy_cols) or 1.0
+            
+            remaining = max(available - fixed_sum, 200)
+            for col in visible_cols:
+                if col in self._COL_FIXED_WIDTHS:
+                    self.tree.column(col, width=self._COL_FIXED_WIDTHS[col], stretch=False)
+                else:
+                    weight = self._COL_STRETCH_PROPORTIONS.get(col, 1.0) / prop_total
+                    self.tree.column(col, width=max(int(remaining * weight), 60), stretch=True)
+        except tk.TclError:
+            pass
     
     def _on_right_click_tree(self, evt):
         """Legacy method - redirect to new handler"""
@@ -5318,7 +5497,7 @@ class App(tk.Tk):
         name_entry = ttk.Entry(name_frame, textvariable=var_name, width=30)
         name_entry.pack(side="left", padx=(4, 0))
 
-        # === Concentration (readonly dropdown) ===
+        # === Concentration (readonly dropdown) + Year ===
         conc_frame = ttk.Frame(frm, style="TFrame")
         conc_frame.pack(fill="x", pady=(0, 10))
         ttk.Label(conc_frame, text="Concentration:", style="TLabel", width=12).pack(side="left")
@@ -5326,7 +5505,13 @@ class App(tk.Tk):
         current_conc = self.get_concentration_name(perfume.concentration_id) if perfume and perfume.concentration_id else ""
         var_conc = tk.StringVar(value=current_conc)
         conc_cb = ttk.Combobox(conc_frame, textvariable=var_conc, values=conc_names, width=15, state="readonly")
-        conc_cb.pack(side="left", padx=(4, 0))
+        conc_cb.pack(side="left", padx=(4, 12))
+        
+        ttk.Label(conc_frame, text="Year:", style="TLabel").pack(side="left")
+        current_year = perfume.year if perfume and getattr(perfume, "year", 0) else ""
+        var_year = tk.StringVar(value=str(current_year))
+        year_entry = ttk.Entry(conc_frame, textvariable=var_year, width=6)
+        year_entry.pack(side="left", padx=(4, 0))
 
         # === Location ===
         loc_frame = ttk.LabelFrame(frm, text="Location", style="TLabelframe")
@@ -5498,6 +5683,13 @@ class App(tk.Tk):
                         break
             else:
                 p.concentration_id = ""
+            
+            # Year (empty or non-numeric => 0)
+            year_str = var_year.get().strip()
+            if year_str.isdigit():
+                p.year = int(year_str)
+            else:
+                p.year = 0
             
             # Locations
             p.outlet_ids = selected_loc_ids.copy()
@@ -6136,8 +6328,8 @@ class App(tk.Tk):
         import_row = ttk.Frame(main_frame, style="TFrame")
         import_row.pack(fill="x", pady=(0, 10))
         ttk.Label(import_row, text="Enter raw vote counts from Fragrantica:", style="Muted.TLabel").pack(side="left")
-        ttk.Button(import_row, text="Import Text", 
-                   command=lambda: self._import_fragrantica_text(entry_map, var_url, win)).pack(side="left", padx=(12, 0))
+        ttk.Button(import_row, text="Import Text",
+                   command=lambda: self._import_fragrantica_text(entry_map, var_url, win, p)).pack(side="left", padx=(12, 0))
 
         # Create a scrollable frame for all vote blocks
         canvas_frame = ttk.Frame(main_frame, style="TFrame")
@@ -6202,7 +6394,7 @@ class App(tk.Tk):
         ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side="right", padx=(8, 0))
         ttk.Button(btn_frame, text="Save", command=lambda: self._save_fragrantica(p, entry_map, var_url.get(), win)).pack(side="right")
 
-    def _import_fragrantica_text(self, entry_map: Dict[str, Dict[str, tk.StringVar]], var_url: tk.StringVar, parent_win: tk.Toplevel):
+    def _import_fragrantica_text(self, entry_map: Dict[str, Dict[str, tk.StringVar]], var_url: tk.StringVar, parent_win: tk.Toplevel, p: Perfume):
         """Open dialog to paste Fragrantica page text and parse vote data"""
         import_win = tk.Toplevel(parent_win)
         import_win.title("Import Fragrantica Text")
@@ -6254,9 +6446,43 @@ class App(tk.Tk):
                             entry_map[block_name][key].set(str(value))
                             filled_count += 1
             
+            # Year auto-detection (per setting). Year changes are persisted immediately
+            # (decoupled from votes) so they survive a Cancel of the Fragrantica dialog.
+            year_msg = ""
+            year_changed = False
+            if self.app_data.import_year_from_fragrantica:
+                detected = extract_launch_year(raw_text)
+                if detected is not None:
+                    existing = getattr(p, "year", 0) or 0
+                    if existing == 0:
+                        p.year = detected
+                        year_msg = f" Year set to {detected}."
+                        year_changed = True
+                    elif existing == detected:
+                        pass
+                    else:
+                        if messagebox.askyesno(
+                            "Overwrite Year?",
+                            f"Year is currently {existing}.\n"
+                            f"Detected {detected} in the imported text.\n\n"
+                            "Overwrite?",
+                            parent=import_win,
+                        ):
+                            p.year = detected
+                            year_msg = f" Year updated to {detected}."
+                            year_changed = True
+                        else:
+                            year_msg = f" Kept existing year {existing}."
+            
+            if year_changed:
+                self.save()
+                self._refresh_list()
+                self._on_select()
+            
             # Show result
+            summary = f"Filled {filled_count} fields.{year_msg}"
             if warnings:
-                status_var.set(f"Filled {filled_count} fields. Warnings: " + "; ".join(warnings))
+                status_var.set(summary + " Warnings: " + "; ".join(warnings))
             else:
                 import_win.destroy()
                 # transient parent will automatically stay on top
