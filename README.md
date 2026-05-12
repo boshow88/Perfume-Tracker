@@ -285,7 +285,7 @@ Manage in the Memo dialog:
 | Font Size | App-wide font size (live preview, persisted on Save) |
 | Columns | Show / hide the optional Treeview columns (Concentration, Year, Location). Also toggleable via right-click on the column headers. |
 | Owned ml Formats | Which purchase types count toward the "Owned ml" derived value |
-| Auto-detect year on Fragrantica import | When enabled, attempts to extract the release year from imported Fragrantica text. New perfumes get their year set automatically; existing year values trigger a confirmation before overwrite. |
+| Auto-detect year on Fragrantica import | When enabled, attempts to extract the release year from imported Fragrantica text. The detected year fills the Year entry in the Fragrantica dialog (overwrite confirmation if a different value was already there). The change is committed only when you press Save. |
 | Insert position when sort is active | Where a newly added perfume goes in the **real (manual) order** when a sort is active: **Below selected** (default) / **Append to end** / **Match sort view position** |
 
 ---

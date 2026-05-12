@@ -6318,18 +6318,28 @@ class App(tk.Tk):
         
         # URL input
         url_frame = ttk.Frame(main_frame, style="TFrame")
-        url_frame.pack(fill="x", pady=(0, 10))
+        url_frame.pack(fill="x", pady=(0, 6))
         ttk.Label(url_frame, text="Fragrantica URL:", style="TLabel").pack(side="left")
         var_url = tk.StringVar(value=(p.fragrantica or {}).get("url", ""))
         url_entry = ttk.Entry(url_frame, textvariable=var_url, width=45)
         url_entry.pack(side="left", padx=(8, 0), fill="x", expand=True)
+        
+        # Year input
+        year_frame = ttk.Frame(main_frame, style="TFrame")
+        year_frame.pack(fill="x", pady=(0, 10))
+        ttk.Label(year_frame, text="Year:", style="TLabel").pack(side="left")
+        var_year = tk.StringVar(value=str(p.year) if getattr(p, "year", 0) else "")
+        year_entry = ttk.Entry(year_frame, textvariable=var_year, width=8)
+        year_entry.pack(side="left", padx=(8, 0))
+        ttk.Label(year_frame, text="(optional; auto-filled by Import Text when enabled in Settings)",
+                 style="Muted.TLabel").pack(side="left", padx=(8, 0))
         
         # Import button row
         import_row = ttk.Frame(main_frame, style="TFrame")
         import_row.pack(fill="x", pady=(0, 10))
         ttk.Label(import_row, text="Enter raw vote counts from Fragrantica:", style="Muted.TLabel").pack(side="left")
         ttk.Button(import_row, text="Import Text",
-                   command=lambda: self._import_fragrantica_text(entry_map, var_url, win, p)).pack(side="left", padx=(12, 0))
+                   command=lambda: self._import_fragrantica_text(entry_map, var_url, var_year, win)).pack(side="left", padx=(12, 0))
 
         # Create a scrollable frame for all vote blocks
         canvas_frame = ttk.Frame(main_frame, style="TFrame")
@@ -6392,9 +6402,10 @@ class App(tk.Tk):
         
         ttk.Button(btn_frame, text="Clear All", command=lambda: self._clear_fragrantica_inputs(entry_map)).pack(side="left")
         ttk.Button(btn_frame, text="Cancel", command=win.destroy).pack(side="right", padx=(8, 0))
-        ttk.Button(btn_frame, text="Save", command=lambda: self._save_fragrantica(p, entry_map, var_url.get(), win)).pack(side="right")
+        ttk.Button(btn_frame, text="Save",
+                   command=lambda: self._save_fragrantica(p, entry_map, var_url.get(), var_year.get(), win)).pack(side="right")
 
-    def _import_fragrantica_text(self, entry_map: Dict[str, Dict[str, tk.StringVar]], var_url: tk.StringVar, parent_win: tk.Toplevel, p: Perfume):
+    def _import_fragrantica_text(self, entry_map: Dict[str, Dict[str, tk.StringVar]], var_url: tk.StringVar, var_year: tk.StringVar, parent_win: tk.Toplevel):
         """Open dialog to paste Fragrantica page text and parse vote data"""
         import_win = tk.Toplevel(parent_win)
         import_win.title("Import Fragrantica Text")
@@ -6446,38 +6457,32 @@ class App(tk.Tk):
                             entry_map[block_name][key].set(str(value))
                             filled_count += 1
             
-            # Year auto-detection (per setting). Year changes are persisted immediately
-            # (decoupled from votes) so they survive a Cancel of the Fragrantica dialog.
+            # Year auto-detection (per setting). Compares against the value in
+            # the year entry of the Fragrantica dialog; updates the entry only.
+            # The actual write to the perfume happens when the user presses Save.
             year_msg = ""
-            year_changed = False
             if self.app_data.import_year_from_fragrantica:
                 detected = extract_launch_year(raw_text)
                 if detected is not None:
-                    existing = getattr(p, "year", 0) or 0
-                    if existing == 0:
-                        p.year = detected
+                    current_str = (var_year.get() or "").strip()
+                    current_year = int(current_str) if current_str.isdigit() else 0
+                    if current_year == 0:
+                        var_year.set(str(detected))
                         year_msg = f" Year set to {detected}."
-                        year_changed = True
-                    elif existing == detected:
+                    elif current_year == detected:
                         pass
                     else:
                         if messagebox.askyesno(
                             "Overwrite Year?",
-                            f"Year is currently {existing}.\n"
+                            f"Year is currently {current_year}.\n"
                             f"Detected {detected} in the imported text.\n\n"
                             "Overwrite?",
                             parent=import_win,
                         ):
-                            p.year = detected
+                            var_year.set(str(detected))
                             year_msg = f" Year updated to {detected}."
-                            year_changed = True
                         else:
-                            year_msg = f" Kept existing year {existing}."
-            
-            if year_changed:
-                self.save()
-                self._refresh_list()
-                self._on_select()
+                            year_msg = f" Kept existing year {current_year}."
             
             # Show result
             summary = f"Filled {filled_count} fields.{year_msg}"
@@ -6503,10 +6508,22 @@ class App(tk.Tk):
             for key, var in vars_dict.items():
                 var.set("0")
 
-    def _save_fragrantica(self, p: Perfume, entry_map: Dict[str, Dict[str, tk.StringVar]], url: str, win: tk.Toplevel):
+    def _save_fragrantica(self, p: Perfume, entry_map: Dict[str, Dict[str, tk.StringVar]], url: str, year_str: str, win: tk.Toplevel):
         """Save Fragrantica vote data to perfume"""
         if p.fragrantica is None:
             p.fragrantica = {}
+        
+        # Year (empty / non-digit => unset = 0)
+        year_str = (year_str or "").strip()
+        if year_str:
+            if not year_str.isdigit():
+                messagebox.showwarning("Invalid Year",
+                                       f"Year must be a positive integer (got '{year_str}').",
+                                       parent=win)
+                return
+            p.year = int(year_str)
+        else:
+            p.year = 0
         
         # Parse and validate all inputs
         for block_name, vars_dict in entry_map.items():
