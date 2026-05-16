@@ -3412,7 +3412,7 @@ class FilterDialog(tk.Toplevel):
                 matches_state = True
             if "tested" in config.states and "Smelled" in state:
                 matches_state = True
-            if "wishlist" in config.states and state == "Wishlist":
+            if "wishlist" in config.states and "Want" in state:
                 matches_state = True
             if not matches_state:
                 return False
@@ -4701,7 +4701,7 @@ class App(tk.Tk):
                 matches_state = True
             if "tested" in config.states and "Smelled" in state:
                 matches_state = True
-            if "wishlist" in config.states and state == "Wishlist":
+            if "wishlist" in config.states and "Want" in state:
                 matches_state = True
             if not matches_state:
                 return False
