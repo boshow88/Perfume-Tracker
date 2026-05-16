@@ -445,7 +445,7 @@ function renderPerfumeList() {
         const brand = brandsMap[p.brand_id] || 'Unknown';
         const conc = concentrationsMap[p.concentration_id] || '';
         const year = parseInt(p.year, 10) || 0;
-        const concYear = [conc, year > 0 ? String(year) : ''].filter(Boolean).join(' · ');
+        const yearText = year > 0 ? String(year) : '';
         const locations = (p.outlet_ids || [])
             .map(id => outletsMap[id]?.name || '')
             .filter(Boolean)
@@ -456,7 +456,8 @@ function renderPerfumeList() {
                  data-id="${p.id}">
                 <span class="brand">${escapeHtml(brand)}</span>
                 <span class="name">${escapeHtml(p.name)}</span>
-                <span class="concentration">${escapeHtml(concYear)}</span>
+                <span class="concentration">${escapeHtml(conc)}</span>
+                <span class="year">${escapeHtml(yearText)}</span>
                 <span class="locations">${escapeHtml(locations)}</span>
             </div>
         `;

@@ -334,7 +334,7 @@ body {
 
 .list-header {
     display: grid;
-    grid-template-columns: 1fr 2fr 80px 120px;
+    grid-template-columns: 1fr 2fr 80px 60px 120px;
     gap: var(--space-sm);
     padding: var(--space-sm) var(--space-lg);
     background: var(--bg-secondary);
@@ -353,7 +353,7 @@ body {
 
 .perfume-item {
     display: grid;
-    grid-template-columns: 1fr 2fr 80px 120px;
+    grid-template-columns: 1fr 2fr 80px 60px 120px;
     gap: var(--space-sm);
     padding: var(--space-sm) var(--space-lg);
     cursor: pointer;
@@ -384,6 +384,11 @@ body {
 }
 
 .perfume-item .concentration {
+    color: var(--text-secondary);
+    font-size: 0.9rem;
+}
+
+.perfume-item .year {
     color: var(--text-secondary);
     font-size: 0.9rem;
 }
@@ -1284,8 +1289,14 @@ body {
     }
     
     .perfume-item .concentration,
+    .perfume-item .year,
     .perfume-item .locations {
         font-size: 0.8rem;
+    }
+    
+    /* Hide empty year span on mobile to avoid an empty stacked line */
+    .perfume-item .year:empty {
+        display: none;
     }
     
     /* Detail panel becomes full screen on mobile */
