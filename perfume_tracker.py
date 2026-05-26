@@ -1176,10 +1176,10 @@ class MiniSpectrum(ttk.Frame):
     """
 
     BASE_DOT_FR_R = 5   # Fragrantica filled-circle radius (drawn below)
-    BASE_DOT_MY_R = 4   # Personal filled-circle radius (drawn above).
-                        # Same shape, different sizes: when scores overlap, the
-                        # larger blue circle shows a thin ring around the
-                        # smaller orange circle -- both stay clearly visible.
+    BASE_DOT_MY_R = 3   # Personal filled-circle radius (drawn above).
+                        # 5:3 size ratio: when scores overlap, the blue
+                        # circle shows a clear ring around the smaller orange
+                        # circle -- both stay distinctly visible.
     BASE_LINE_W = 110   # Spectrum drawing width in px (at BASE_FONT_SIZE)
     BASE_LINE_H = 18    # Canvas height (room for circle + a little padding)
 

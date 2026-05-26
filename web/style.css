@@ -25,6 +25,13 @@
     --accent-success: #00b894;
     --accent-warning: #fdcb6e;
     --accent-danger: #e17055;
+
+    /* Vote source colors - mirror the desktop app so the collapsed-state
+       summary widgets read the same on both platforms.  */
+    --vote-fr: #6AA9FF;        /* Fragrantica side (blue) */
+    --vote-my: #FFB86A;        /* Personal side (orange) */
+    --vote-agree: #5FCB6E;     /* Both sides agree (green) */
+    --vote-line: #4a4a5a;      /* Spectrum baseline */
     
     /* Typography */
     --font-display: 'Cormorant Garamond', serif;
@@ -584,9 +591,97 @@ body {
     font-size: 0.95rem;
 }
 
-.block-score.gender-spectrum {
+/* ----- Collapsed-state vote-summary widgets -----
+   Two parallel widgets mirror what the desktop app draws in tk Canvas:
+     - .mini-spectrum  : numeric dimensions (rating / longevity / sillage /
+                         value / gender), two dots on a line with optional
+                         endpoint labels and a hover tooltip with exact scores
+     - .when-strip     : When-to-Wear categorical block, 6 fixed-width slots
+                         coloured by who picked each (Fragrantica / personal /
+                         both / neither)
+   All dimensions are em-based so they scale naturally with the rendered
+   font size; no JS-side scaling is required as on the desktop side.        */
+
+.mini-spectrum {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1;
+    cursor: help;
+}
+
+.mini-spectrum .ms-label {
+    display: inline-block;
+    min-width: 0.9em;
+    text-align: center;
+}
+
+.mini-spectrum .ms-track {
+    position: relative;
+    display: inline-block;
+    width: 7.5em;
+    height: 1.2em;
+}
+
+.mini-spectrum .ms-line {
+    position: absolute;
+    top: 50%;
+    left: 0;
+    right: 0;
+    height: 2px;
+    transform: translateY(-50%);
+    background: var(--vote-line);
+    border-radius: 1px;
+}
+
+.mini-spectrum .ms-dot {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+}
+
+/* Same 5:3 size ratio as desktop so the orange dot tucks visibly inside
+   the blue one when scores overlap.                                          */
+.mini-spectrum .ms-dot-fr {
+    width: 0.85em;
+    height: 0.85em;
+    background: var(--vote-fr);
+}
+
+.mini-spectrum .ms-dot-my {
+    width: 0.5em;
+    height: 0.5em;
+    background: var(--vote-my);
+    z-index: 1;
+}
+
+.when-strip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35em;
     font-family: monospace;
-    letter-spacing: -1px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    cursor: help;
+}
+
+.when-strip .when-slot {
+    display: inline-block;
+    min-width: 2.4em;
+    text-align: center;
+}
+
+.when-strip .when-slot.fr    { color: var(--vote-fr); }
+.when-strip .when-slot.my    { color: var(--vote-my); }
+.when-strip .when-slot.agree { color: var(--vote-agree); }
+/* Empty slot keeps the width so the strip stays aligned across perfumes,
+   but its label is invisible to avoid implying a non-vote is a negative.   */
+.when-strip .when-slot.empty {
+    color: transparent;
 }
 
 .block-sample {

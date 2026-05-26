@@ -246,6 +246,96 @@ function getSampleSize(votes, block) {
     return block.keys.reduce((sum, k) => sum + (parseInt(votes[k]) || 0), 0);
 }
 
+// Top When-to-Wear picks: mirrors desktop _when_to_wear_top_keys (>=60% of max).
+function whenToWearTopKeys(votes, keys) {
+    if (!votes) return [];
+    const maxV = Math.max(...keys.map(k => parseInt(votes[k]) || 0));
+    if (maxV === 0) return [];
+    const threshold = maxV * 0.6;
+    return keys.filter(k => (parseInt(votes[k]) || 0) >= threshold);
+}
+
+// Personal "voted" keys for any block: simply value > 0 (matches desktop).
+function personalVotedKeys(votes, keys) {
+    if (!votes) return [];
+    return keys.filter(k => (parseInt(votes[k]) || 0) > 0);
+}
+
+// Escape for use inside a double-quoted HTML attribute (e.g. `title="..."`).
+function escapeAttr(s) {
+    return String(s)
+        .replace(/&/g, '&amp;').replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+// Render a compact spectrum with optional Fragrantica + Personal dots.
+// Mirrors desktop MiniSpectrum: blue (larger) under, orange (smaller) on top.
+// `leftLabel` / `rightLabel` are optional one-char endpoint markers.
+function renderMiniSpectrum(frScore, myScore, scoreMin, scoreMax, leftLabel, rightLabel, frVotes, myVotes, keys, blockName) {
+    const span = scoreMax - scoreMin;
+    const toPct = (s) => {
+        // Keep dots inside the visible track; 6% margin both sides matches
+        // the desktop margin = max(dot_radius) + 1.
+        const margin = 6;
+        const frac = span <= 0 ? 0.5 : Math.max(0, Math.min(1, (s - scoreMin) / span));
+        return margin + frac * (100 - 2 * margin);
+    };
+
+    const dots = [];
+    if (frScore !== null && frScore !== undefined) {
+        dots.push(`<span class="ms-dot ms-dot-fr" style="left:${toPct(frScore).toFixed(2)}%"></span>`);
+    }
+    if (myScore !== null && myScore !== undefined) {
+        dots.push(`<span class="ms-dot ms-dot-my" style="left:${toPct(myScore).toFixed(2)}%"></span>`);
+    }
+
+    // Hover detail: Fragrantica to 2 decimals (matches the site), personal as
+    // integer (single-vote per dimension on the user's side).
+    const frN = frVotes ? keys.reduce((s, k) => s + (parseInt(frVotes[k]) || 0), 0) : 0;
+    const myN = myVotes ? keys.reduce((s, k) => s + (parseInt(myVotes[k]) || 0), 0) : 0;
+    const frTxt = (frScore !== null && frScore !== undefined) ? `${frScore.toFixed(2)} (${frN} votes)` : '—';
+    const myTxt = (myScore !== null && myScore !== undefined) ? `${Math.round(myScore)} (${myN} vote${myN === 1 ? '' : 's'})` : '—';
+    const tip = `Fragrantica: ${frTxt}\nMine: ${myTxt}`;
+
+    const left = leftLabel ? `<span class="ms-label">${leftLabel}</span>` : '';
+    const right = rightLabel ? `<span class="ms-label">${rightLabel}</span>` : '';
+
+    return `<span class="mini-spectrum" title="${escapeAttr(tip)}">${left}<span class="ms-track"><span class="ms-line"></span>${dots.join('')}</span>${right}</span>`;
+}
+
+// Render the 6-slot When-to-Wear strip. Four states per slot:
+//   agree (both)   = green
+//   fr  (Fragrantica top only) = blue
+//   my  (personal voted only)  = orange
+//   empty (neither) = blank but reserves width for alignment
+function renderWhenToWearStrip(frTopKeys, myVotedKeys, frVotes, myVotes, keys) {
+    const labels = {
+        spring: 'SPR', summer: 'SUM', fall: 'FAL', winter: 'WIN',
+        day: 'DAY', night: 'NGT'
+    };
+    const order = ['spring', 'summer', 'fall', 'winter', 'day', 'night'];
+    const frSet = new Set(frTopKeys || []);
+    const mySet = new Set(myVotedKeys || []);
+
+    const slots = order.map(k => {
+        const inFr = frSet.has(k);
+        const inMy = mySet.has(k);
+        let cls = 'empty';
+        if (inFr && inMy) cls = 'agree';
+        else if (inFr) cls = 'fr';
+        else if (inMy) cls = 'my';
+        return `<span class="when-slot ${cls}">${labels[k] || k.toUpperCase()}</span>`;
+    }).join('');
+
+    const frN = frVotes ? keys.reduce((s, k) => s + (parseInt(frVotes[k]) || 0), 0) : 0;
+    const myN = myVotes ? keys.reduce((s, k) => s + (parseInt(myVotes[k]) || 0), 0) : 0;
+    const frTxt = frTopKeys && frTopKeys.length ? frTopKeys.map(k => k.replace(/_/g, ' ')).join(', ') : '—';
+    const myTxt = myVotedKeys && myVotedKeys.length ? myVotedKeys.map(k => k.replace(/_/g, ' ')).join(', ') : '—';
+    const tip = `Fragrantica top: ${frTxt}  (${frN} votes)\nMine: ${myTxt}  (${myN} votes)`;
+
+    return `<span class="when-strip" title="${escapeAttr(tip)}">${slots}</span>`;
+}
+
 function getPerfumeScore(p, voteKey) {
     const block = VOTE_BLOCKS.find(b => b.key === voteKey);
     if (!block || !p.fragrantica) return null;
@@ -605,23 +695,27 @@ function renderFragrantica(p) {
         
         const normalized = normalizeVotes(fData, block);
         const score = calculateScore(fData, block);
+        const myScore = calculateScore(mData, block);
         const sampleSize = getSampleSize(fData, block);
-        
-        // Build score display with label
+
+        // Collapsed-state visual summary, matching the desktop widgets so the
+        // user can read Fragrantica + their own vote at a glance.
         let scoreDisplay = '';
-        if (score !== null && block.maxScore) {
-            if (block.key === 'gender_votes') {
-                // Gender: visual spectrum ♀────●────♂ (male=5 on right, female=1 on left)
-                const pos = Math.round((score - 1) / 4 * 8);  // 0-8 position (female=1, male=5)
-                const spectrum = '♀' + '─'.repeat(pos) + '●' + '─'.repeat(8 - pos) + '♂';
-                scoreDisplay = `<span class="block-score gender-spectrum">${spectrum}</span>`;
-            } else {
-                // Other blocks: score + label like "4.5 eternal"
-                const n = block.keys.length;
-                const index = Math.round(n - score);
-                const label = block.keys[Math.max(0, Math.min(n - 1, index))].replace(/_/g, ' ');
-                scoreDisplay = `<span class="block-score">${score.toFixed(1)} ${label}</span>`;
-            }
+        if (block.key === 'season_time_votes') {
+            const frTop = whenToWearTopKeys(fData, block.keys);
+            const myVoted = personalVotedKeys(mData, block.keys);
+            scoreDisplay = renderWhenToWearStrip(frTop, myVoted, fData, mData, block.keys);
+        } else if (block.maxScore) {
+            const scoreMin = 1;
+            const scoreMax = block.maxScore;
+            const [leftLabel, rightLabel] = block.key === 'gender_votes'
+                ? ['\u2640', '\u2642']                       // ♀  ♂
+                : ['1', String(scoreMax)];
+            scoreDisplay = renderMiniSpectrum(
+                score, myScore, scoreMin, scoreMax,
+                leftLabel, rightLabel,
+                fData, mData, block.keys, block.key
+            );
         }
         
         // Build items with bar charts
