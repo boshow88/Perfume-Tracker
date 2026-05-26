@@ -1378,7 +1378,8 @@ class SortDialog(tk.Toplevel):
         ("state", "State"),
     ]
     
-    def __init__(self, parent, current_config: SortConfig, on_apply):
+    def __init__(self, parent, current_config: SortConfig, on_apply,
+                 selected_count: int = 0, on_apply_to_selection=None):
         super().__init__(parent)
         self.title("Sort Configuration")
         self.configure(bg=COLORS["bg"])
@@ -1387,6 +1388,9 @@ class SortDialog(tk.Toplevel):
         
         self.current_config = current_config
         self.on_apply = on_apply
+        # One-time, in-place sort on a multi-selection (callback may be None)
+        self.selected_count = selected_count
+        self.on_apply_to_selection = on_apply_to_selection
         self.result = None
         
         # Track active dimensions
@@ -1478,12 +1482,43 @@ class SortDialog(tk.Toplevel):
         btns.grid(row=4, column=0, columnspan=2, sticky="e", pady=(16, 0))
         
         ttk.Button(btns, text="Cancel", command=self.destroy).pack(side="left", padx=(0, 8))
-        ttk.Button(btns, text="Apply", command=self._apply).pack(side="left")
-        
+        btn_apply = ttk.Button(btns, text="Apply", command=self._apply)
+        btn_apply.pack(side="left")
+        self._attach_tooltip(
+            btn_apply,
+            "Apply as a temporary view sort.\n"
+            "The manual order in the list is NOT modified.\n"
+            "Use 'Lock Order' on the main window to commit this view "
+            "into the manual order.",
+        )
+        # Optional: one-time sort applied directly to a multi-selection
+        # (rewrites the manual order at those positions and closes the dialog)
+        if self.on_apply_to_selection is not None and self.selected_count >= 2:
+            btn_sel = ttk.Button(
+                btns,
+                text=f"Apply to Selection ({self.selected_count})",
+                command=self._apply_to_selection,
+            )
+            btn_sel.pack(side="left", padx=(8, 0))
+            self._attach_tooltip(
+                btn_sel,
+                f"Permanently reorder the {self.selected_count} selected perfumes "
+                "in place.\n"
+                "Their manual order at those positions will be rewritten "
+                "immediately (a confirmation will appear).\n"
+                "Unselected perfumes are not affected.",
+            )
+
         # Configure grid weights for resizing
         main.columnconfigure(0, weight=1)
         main.columnconfigure(1, weight=2)
         main.rowconfigure(2, weight=1)  # Row with Available and Active sorts
+
+    def _attach_tooltip(self, widget, text: str):
+        """Attach a hover tooltip to a widget using the shared ToolTip class."""
+        tip = ToolTip(widget, delay=500)
+        widget.bind("<Enter>", lambda e: tip.schedule(text))
+        widget.bind("<Leave>", lambda e: (tip.cancel(), tip.hide()))
     
     def _update_active_text(self):
         """Update the active sorts text display"""
@@ -1629,6 +1664,20 @@ class SortDialog(tk.Toplevel):
         self.result = SortConfig(dimensions=list(self.active_dimensions))
         if self.on_apply:
             self.on_apply(self.result)
+        self.destroy()
+
+    def _apply_to_selection(self):
+        """One-time in-place sort on the multi-selection (rewrites manual order)."""
+        if not self.active_dimensions:
+            messagebox.showwarning(
+                "No dimensions",
+                "Pick at least one sort dimension before applying to the selection.",
+                parent=self,
+            )
+            return
+        config = SortConfig(dimensions=list(self.active_dimensions))
+        if self.on_apply_to_selection:
+            self.on_apply_to_selection(config)
         self.destroy()
 
 
@@ -4086,7 +4135,7 @@ class App(tk.Tk):
             tree_frame,
             columns=all_columns,
             show="headings",
-            selectmode="browse",
+            selectmode="extended",
             height=18,
         )
         self.tree.heading("brand", text="Brand")
@@ -4118,6 +4167,12 @@ class App(tk.Tk):
             return handler
         self.tree.bind("<Alt-Up>", _alt_move(-1))
         self.tree.bind("<Alt-Down>", _alt_move(1))
+
+        # Delete key removes the currently selected perfume(s) with confirmation
+        def _on_delete_key(event=None):
+            self.ui_delete_perfume()
+            return "break"
+        self.tree.bind("<Delete>", _on_delete_key)
         
         # Right-click on header for column visibility
         self.tree.bind("<Button-3>", self._on_tree_right_click)
@@ -4413,14 +4468,77 @@ class App(tk.Tk):
             for item_id, item, _, _ in items:
                 current_map[item_id] = item
     
+    def _apply_sort_to_selection(self, config: SortConfig):
+        """One-time, in-place sort on the current multi-selection.
+
+        The selected perfumes are sorted by `config` and written back to their
+        original positions in `self.perfumes` (non-selected items untouched).
+        After this, the new order IS the manual order for those slots.
+        """
+        try:
+            selected_ids = set(self.tree.selection())
+        except tk.TclError:
+            selected_ids = set()
+        if len(selected_ids) < 2 or not config.dimensions:
+            return
+
+        # Collect positions and items in real (manual) order
+        positions: List[int] = []
+        items: List[Perfume] = []
+        for idx, p in enumerate(self.perfumes):
+            if p.id in selected_ids:
+                positions.append(idx)
+                items.append(p)
+        if len(items) < 2:
+            return
+
+        # Confirm — this is a destructive change to manual order
+        dim_text = ", ".join(
+            f"{next(lbl for d, lbl in SortDialog.DIMENSIONS if d == dim)} "
+            f"({'asc' if order == 'asc' else 'desc'})"
+            for dim, order in config.dimensions
+        )
+        if not messagebox.askyesno(
+            "Sort Selection",
+            f"Sort the {len(items)} selected perfumes by:\n  {dim_text}\n\n"
+            "Their manual order at these positions will be permanently rewritten.",
+            parent=self,
+        ):
+            return
+
+        sorted_items = self._sort_perfumes(items, config)
+        for pos, p in zip(positions, sorted_items):
+            self.perfumes[pos] = p
+
+        self.save()
+        self._refresh_list()
+        # Restore the same selection (by id), and keep first one in view
+        try:
+            self.tree.selection_set(list(selected_ids))
+            first = sorted_items[0].id
+            self.tree.focus(first)
+            self.tree.see(first)
+        except tk.TclError:
+            pass
+
     def ui_open_sort(self):
         """Open sort configuration dialog"""
         def on_apply(config: SortConfig):
             self.sort_config = config
             self._update_button_states()
             self._refresh_list()
-        
-        SortDialog(self, self.sort_config, on_apply)
+
+        def on_apply_to_selection(config: SortConfig):
+            self._apply_sort_to_selection(config)
+
+        try:
+            selected_count = len(self.tree.selection())
+        except tk.TclError:
+            selected_count = 0
+
+        SortDialog(self, self.sort_config, on_apply,
+                   selected_count=selected_count,
+                   on_apply_to_selection=on_apply_to_selection)
     
     def ui_open_filter(self):
         """Open filter configuration dialog"""
@@ -4448,9 +4566,14 @@ class App(tk.Tk):
         else:
             self.sort_button.config(bg=COLORS["panel"], fg=COLORS["text"], relief="groove")
         
-        # Reorder buttons: Up/Down only in manual mode; Lock Order only when sort active
+        # Reorder buttons: Up/Down only in manual mode AND single selection;
+        # Lock Order only when sort active
         if hasattr(self, "btn_move_up"):
-            move_state = "disabled" if has_sort else "normal"
+            try:
+                sel_count = len(self.tree.selection())
+            except tk.TclError:
+                sel_count = 0
+            move_state = "normal" if (not has_sort and sel_count == 1) else "disabled"
             self.btn_move_up.config(state=move_state)
             self.btn_move_down.config(state=move_state)
             self.btn_lock_order.config(state="normal" if has_sort else "disabled")
@@ -4501,6 +4624,13 @@ class App(tk.Tk):
         if self.sort_config.dimensions:
             return  # Disabled when sort is active
         
+        # Up/Down only operates on a single selection
+        try:
+            if len(self.tree.selection()) != 1:
+                return
+        except tk.TclError:
+            return
+
         sel_id = self._get_selected_id()
         if not sel_id or not self.filtered_ids:
             return
@@ -4919,6 +5049,9 @@ class App(tk.Tk):
         return (0,)
 
     def _on_select(self, event=None):
+        # Selection-count drives Up/Down button state
+        self._update_button_states()
+
         pid = self._get_selected_id()
         if not pid:
             return
@@ -5266,10 +5399,29 @@ class App(tk.Tk):
             # Show item context menu
             row_id = self.tree.identify_row(evt.y)
             if row_id:
-                self.tree.selection_set(row_id)
-                self.tree.focus(row_id)
-                self._on_select()
+                # Preserve an existing multi-selection if the clicked row is
+                # already part of it; otherwise reset to just the clicked row.
+                current = self.tree.selection()
+                if row_id not in current:
+                    self.tree.selection_set(row_id)
+                    self.tree.focus(row_id)
+                    self._on_select()
+                # Update labels that depend on selection count (e.g., Delete)
+                self._refresh_context_menu_labels()
                 self.menu.tk_popup(evt.x_root, evt.y_root)
+
+    def _refresh_context_menu_labels(self):
+        """Update context-menu entries whose labels depend on selection size."""
+        try:
+            n = len(self.tree.selection())
+        except tk.TclError:
+            n = 0
+        label = "Delete Perfume" if n <= 1 else f"Delete {n} Perfumes"
+        try:
+            # The Delete entry is the last command in self.menu
+            self.menu.entryconfig("end", label=label)
+        except tk.TclError:
+            pass
     
     # Optional Treeview columns (Brand/Name are required and always visible)
     OPTIONAL_COLUMNS = [
@@ -6568,24 +6720,52 @@ class App(tk.Tk):
         self.save()
         win.destroy()
 
-    def ui_delete_perfume(self):
+    def ui_delete_perfume(self, event=None):
         """
-        Mouse-first:
-          - Right-click context menu -> Delete
+        Delete the currently selected perfume(s).
+
+        - 1 selected: single-perfume confirmation (Brand – Name).
+        - 2+ selected: bulk confirmation listing up to a few names + total count.
+        Triggered from the right-click context menu or the Delete key.
         """
-        pid = self._get_selected_id()
-        if not pid:
-            return
-        p = self._get_perfume(pid)
-        if not p:
+        try:
+            selected_ids = list(self.tree.selection())
+        except tk.TclError:
+            selected_ids = []
+        if not selected_ids:
             return
 
-        brand_display = self.get_brand_name(p.brand_id)
-        if not messagebox.askyesno("Delete", f"Delete this perfume?\n\n{brand_display} – {p.name}\n\nThis cannot be undone."):
+        targets = [self._get_perfume(pid) for pid in selected_ids]
+        targets = [t for t in targets if t is not None]
+        if not targets:
             return
 
-        # Remove from app_data.perfumes (must modify in-place to keep reference)
-        self.app_data.perfumes[:] = [x for x in self.app_data.perfumes if x.id != pid]
+        if len(targets) == 1:
+            p = targets[0]
+            brand_display = self.get_brand_name(p.brand_id)
+            if not messagebox.askyesno(
+                "Delete",
+                f"Delete this perfume?\n\n{brand_display} – {p.name}\n\nThis cannot be undone.",
+            ):
+                return
+        else:
+            # Build a short preview of names for the confirmation
+            preview_n = 5
+            preview_lines = []
+            for p in targets[:preview_n]:
+                preview_lines.append(f"  • {self.get_brand_name(p.brand_id)} – {p.name}")
+            if len(targets) > preview_n:
+                preview_lines.append(f"  ... and {len(targets) - preview_n} more")
+            preview = "\n".join(preview_lines)
+            if not messagebox.askyesno(
+                "Delete Perfumes",
+                f"Delete {len(targets)} perfumes?\n\n{preview}\n\nThis cannot be undone.",
+            ):
+                return
+
+        kill = {p.id for p in targets}
+        # Remove in-place to keep the app_data.perfumes reference intact
+        self.app_data.perfumes[:] = [x for x in self.app_data.perfumes if x.id not in kill]
         self.tree.delete(*self.tree.get_children())
         self.detail_title.config(text="(no selection)")
         self.name_conc_label.config(text="")

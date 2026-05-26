@@ -124,6 +124,9 @@ Listed left-to-right as they appear in the toolbar:
 - Visibility is persistent (stored in `perfumes.json`)
 - Double-click a perfume to open the Info edit dialog
 - **Hover tooltip**: Hover on any cell to see full content (useful for truncated text)
+- **Multi-select**: Ctrl-click / Shift-click to select multiple perfumes
+  - Sort → "Apply to Selection" reorders the selected perfumes in place
+  - Right-click → "Delete N Perfumes" (or press **Delete**) removes them all in one confirmation
 
 ### Right Panel Detail
 - **Brand**: Displayed as title (first line), hover for full text
@@ -216,10 +219,17 @@ Supports multi-level sorting (e.g., Gender first, then Rating, then Name).
 - The perfume list has an underlying manual order (your real, persistent order).
 - When no sort is active, the list shows this manual order; use ↑/↓ buttons or Alt+↑/↓ to rearrange.
   - Reorder operations only swap among visible (filtered) items; hidden items keep their position.
+  - ↑/↓ require exactly one selected perfume (disabled when multiple are selected).
 - When a sort is active, the manual order is preserved silently behind the scenes:
   - ↑/↓ are disabled; Lock Order becomes available.
   - Click **Lock Order** to commit the current sort view as the new manual order (applied to ALL perfumes, ignoring filter). Sort is cleared automatically afterward.
 - See Settings for how new perfumes are inserted while a sort is active.
+
+**Sort Dialog buttons** (hover for in-app tooltips):
+- **Apply** — Temporary view sort. The manual order in the list is NOT modified. Use **Lock Order** on the main window to commit the current view into the manual order.
+- **Apply to Selection (N)** — Appears only when 2+ perfumes are selected (Ctrl-click / Shift-click to multi-select). Permanently reorders the selected perfumes **in place**: each one is rewritten back to its own original position, sorted by the chosen dimensions. Unselected perfumes are not affected. A confirmation dialog appears before the rewrite.
+  - Useful when you have a contiguous group (e.g., all perfumes of one brand) that you want to reorder internally without disturbing the rest of the list.
+  - "In place" means positions are preserved; this feature does NOT move perfumes around or group them together.
 
 ### 5. Quick Event
 
