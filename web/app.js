@@ -103,7 +103,7 @@ const VOTE_BLOCKS = [
         myKey: 'my_gender_votes',
         label: 'Gender',
         keys: ['male', 'more_male', 'unisex', 'more_female', 'female'],
-        weights: [1, 2, 3, 4, 5],  // male=1 to female=5 (same as desktop)
+        weights: [5, 4, 3, 2, 1],  // male=5 → female=1 (aligned with all other dims; same as desktop)
         maxScore: 5,
         normalize: 'sum'
     },
@@ -611,9 +611,9 @@ function renderFragrantica(p) {
         let scoreDisplay = '';
         if (score !== null && block.maxScore) {
             if (block.key === 'gender_votes') {
-                // Gender: visual spectrum only ♂────●────♀
-                const pos = Math.round((score - 1) / 4 * 8);  // 0-8 position (male=1, female=5)
-                const spectrum = '♂' + '─'.repeat(pos) + '●' + '─'.repeat(8 - pos) + '♀';
+                // Gender: visual spectrum ♀────●────♂ (male=5 on right, female=1 on left)
+                const pos = Math.round((score - 1) / 4 * 8);  // 0-8 position (female=1, male=5)
+                const spectrum = '♀' + '─'.repeat(pos) + '●' + '─'.repeat(8 - pos) + '♂';
                 scoreDisplay = `<span class="block-score gender-spectrum">${spectrum}</span>`;
             } else {
                 // Other blocks: score + label like "4.5 eternal"

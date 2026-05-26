@@ -252,20 +252,28 @@ Date and Location persist when switching perfumes for batch logging.
 4. The parser extracts vote counts from all 6 dimensions automatically
 
 **6 Rating Dimensions**:
-1. **Rating** - love / like / ok / dislike / hate (displays: "4.5 love")
-2. **Longevity** - eternal / long / moderate / weak / poor (displays: "4.2 eternal")
-3. **Sillage** - enormous / strong / moderate / intimate (displays: "3.1 strong")
-4. **Gender** - male / more_male / unisex / more_female / female (displays: ♂──●──♀)
-5. **Value** - excellent / good / fair / expensive / overpriced (displays: "3.8 good")
+1. **Rating** - love / like / ok / dislike / hate
+2. **Longevity** - eternal / long / moderate / weak / poor
+3. **Sillage** - enormous / strong / moderate / intimate
+4. **Gender** - female / more_female / unisex / more_male / male (score: female=1, male=5)
+5. **Value** - excellent / good / fair / expensive / overpriced
 6. **When to Wear** - spring / summer / fall / winter / day / night
 
-**Dual-Track Display**:
-- Blue bar = Fragrantica official data
-- Orange bar = Personal vote
+**Collapsed-state title row** (at-a-glance):
+- Numeric dimensions show a mini spectrum with two dots:
+  - Blue circle (larger) = Fragrantica weighted score
+  - Orange circle (smaller, drawn on top) = Personal score
+  - Endpoint labels: `1` / `5` for ratings, `♀` / `♂` for gender (male on the right, matching "high score = right" across all dimensions)
+- "When to Wear" shows a 6-slot strip (`SPR SUM FAL WIN DAY NGT`):
+  - Blue text = in Fragrantica's top picks
+  - Orange text = personally voted
+  - Green text = both agree
+  - Blank slot = neither side picked it
+- Hovering any of these reveals exact numbers (Fragrantica to 2 decimals, personal as integers).
 
-**Bar Background**:
-- Gray = Not voted
-- Dark orange = Voted (click option name to vote/unvote)
+**Expanded-state bars** (click the title or `＋` to expand):
+- Blue bar = Fragrantica official data, Orange bar = Personal vote
+- Bar background: Gray = Not voted, Dark orange = Voted (click option name to vote/unvote)
 
 **Expand/Collapse**:
 - Click ＋/－ on each section to expand/collapse

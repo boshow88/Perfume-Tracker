@@ -46,10 +46,29 @@ COLORS = {
     "accent": "#6AA9FF",
     "accent2": "#FFB86A",   # personal marker (bar color)
     "accent2_bg": "#2A1A10",  # personal marker (background)
+    "agree": "#5FCB6E",     # when both Fragrantica and personal agree
     "nodata": "#0B0B0B",
     "lowsample": "#2B1E00",  # subtle low-sample hint
     "good": "#1F2B1F",
 }
+
+# Hover-tooltip activation delays (milliseconds). Different interactions deserve
+# different latency: scanning vs. deliberate query.
+TOOLTIP_DELAY_DETAIL = 250    # quick reveal for in-place score detail (spectrum hover)
+TOOLTIP_DELAY_BUTTON = 400    # button explanations: faster than text-reveal
+TOOLTIP_DELAY_LABEL = 600     # full-text reveal on truncated labels
+TOOLTIP_DELAY_TREEVIEW = 700  # tree cell hover, longer to avoid flicker while scanning
+
+# Canvas/widget pixel dimensions are stored as "base" values calibrated for
+# this font size. scale_px() rescales them linearly when the user changes
+# the app's font_size, so Canvas-drawn elements (spectrum, dots, bars, icons)
+# breathe with the rest of the UI instead of looking stuck at one size.
+BASE_FONT_SIZE = 10
+
+
+def scale_px(base_px, font_size) -> int:
+    """Scale a base px dimension proportional to font_size (default 10)."""
+    return max(1, int(round(base_px * font_size / BASE_FONT_SIZE)))
 
 # Fragrantica-aligned options
 RATING_5 = ["love", "like", "ok", "dislike", "hate"]
@@ -284,7 +303,7 @@ FONT_SIZES = [6, 7, 8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24]
 # -----------------------------
 class ToolTip:
     """A simple tooltip that appears on hover."""
-    def __init__(self, widget, delay=500):
+    def __init__(self, widget, delay=TOOLTIP_DELAY_LABEL):
         self.widget = widget
         self.delay = delay  # ms before showing
         self.tip_window = None
@@ -335,7 +354,7 @@ class ToolTip:
 
 class TreeviewTooltip:
     """Tooltip for Treeview that shows full cell content on hover."""
-    def __init__(self, tree, delay=600):
+    def __init__(self, tree, delay=TOOLTIP_DELAY_TREEVIEW):
         self.tree = tree
         self.tooltip = ToolTip(tree, delay)
         self.current_cell = (None, None)  # (row, column)
@@ -394,7 +413,7 @@ class TreeviewTooltip:
 
 class LabelTooltip:
     """Tooltip for Label widgets that shows full text on hover."""
-    def __init__(self, label, delay=600):
+    def __init__(self, label, delay=TOOLTIP_DELAY_LABEL):
         self.label = label
         self.tooltip = ToolTip(label, delay)
         self._text = ""
@@ -807,18 +826,23 @@ def calculate_sillage_summary(votes: Dict[str, int], keys: List[str]) -> str:
 
 
 def calculate_gender_summary(votes: Dict[str, int], keys: List[str]) -> str:
-    """Calculate weighted average and show as spectrum position"""
+    """Calculate weighted average and show as spectrum position.
+
+    Encoding mirrors calculate_gender_score: male=5 (right), female=1 (left).
+    Visual spectrum: ♀────●────♂.
+    """
     total = sum(int(votes.get(k, 0) or 0) for k in keys)
     if total == 0:
         return "—"
     
-    weights = {keys[i]: i+1 for i in range(len(keys))}  # male=1 to female=5
+    n = len(keys)
+    weights = {keys[i]: n - i for i in range(n)}  # male=5 → female=1
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     score = weighted_sum / total
     
-    # Visual spectrum only: ♂────●────♀
-    pos = int((score - 1) / 4 * 8)  # 0-8 position
-    spectrum = "♂" + "─" * pos + "●" + "─" * (8 - pos) + "♀"
+    # Visual spectrum: ♀ on left (score=1), ♂ on right (score=5)
+    pos = int((score - 1) / 4 * 8)  # 0..8 position
+    spectrum = "♀" + "─" * pos + "●" + "─" * (8 - pos) + "♂"
     return spectrum
 
 
@@ -877,11 +901,17 @@ def calculate_sillage_score(votes: Dict[str, int], keys: List[str]) -> float:
 
 
 def calculate_gender_score(votes: Dict[str, int], keys: List[str]) -> float:
-    """Calculate gender score: 1 to 5 (female to male)"""
+    """Calculate gender score: male=5 → female=1.
+
+    Encoding intentionally aligns with all other numeric dimensions:
+    keys[0] (top of the expanded list) gets the highest weight, matching
+    the visual convention of "top = positive direction = right side".
+    """
     total = sum(int(votes.get(k, 0) or 0) for k in keys)
     if total == 0:
         return 0.0
-    weights = {keys[i]: i+1 for i in range(len(keys))}
+    n = len(keys)
+    weights = {keys[i]: n - i for i in range(n)}  # male=5 → female=1
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     return weighted_sum / total
 
@@ -895,6 +925,79 @@ def calculate_value_score(votes: Dict[str, int], keys: List[str]) -> float:
     weights = {keys[i]: n - i for i in range(n)}  # excellent=5, ..., overpriced=1
     weighted_sum = sum(int(votes.get(k, 0) or 0) * weights[k] for k in keys)
     return weighted_sum / total
+
+
+# -----------------------------
+# Helpers for the compact summary widgets (MiniSpectrum / WhenToWearStrip)
+# -----------------------------
+
+# Dispatch table: block_name → (score function). Non-numeric blocks (e.g.
+# When-to-Wear) are intentionally absent.
+_SCORE_FUNCS = {
+    "rating_votes":    calculate_rating_score,
+    "longevity_votes": calculate_longevity_score,
+    "sillage_votes":   calculate_sillage_score,
+    "gender_votes":    calculate_gender_score,
+    "value_votes":     calculate_value_score,
+}
+
+
+def _weighted_score(votes, keys, block_name):
+    """Return the weighted score for the given block, or None when there are
+    no votes (so the spectrum can hide that dot instead of showing 0)."""
+    func = _SCORE_FUNCS.get(block_name)
+    if func is None:
+        return None
+    total = sum(int((votes or {}).get(k, 0) or 0) for k in keys)
+    if total == 0:
+        return None
+    return func(votes or {}, keys)
+
+
+def _when_to_wear_top_keys(votes, keys):
+    """Mirror calculate_when_summary's 60%-of-max rule for the 'top' picks."""
+    if not votes:
+        return []
+    max_v = max(int(votes.get(k, 0) or 0) for k in keys)
+    if max_v == 0:
+        return []
+    threshold = max_v * 0.6
+    return [k for k in keys if int(votes.get(k, 0) or 0) >= threshold]
+
+
+def _format_score_detail(fr_score, my_score, fr_votes, my_votes, keys) -> str:
+    """Two-line tooltip text for a numeric spectrum.
+
+    Fragrantica uses 2 decimals (matches the site); personal uses integer to
+    side-emphasize that the user's votes are conceptually integer-grained.
+    """
+    fr_n = sum(int((fr_votes or {}).get(k, 0) or 0) for k in keys)
+    my_n = sum(int((my_votes or {}).get(k, 0) or 0) for k in keys)
+    lines = []
+    if fr_score is not None:
+        lines.append(f"Fragrantica: {fr_score:.2f}  ({fr_n} votes)")
+    else:
+        lines.append("Fragrantica: —")
+    if my_score is not None:
+        if my_n > 1:
+            lines.append(f"Mine: {round(my_score)}  ({my_n} votes)")
+        else:
+            lines.append(f"Mine: {round(my_score)}")
+    else:
+        lines.append("Mine: —")
+    return "\n".join(lines)
+
+
+def _format_when_detail(fr_votes, my_votes, keys) -> str:
+    """Two-line tooltip text for the When-to-Wear strip."""
+    fr_top = _when_to_wear_top_keys(fr_votes or {}, keys)
+    my_voted = [k for k in keys if int((my_votes or {}).get(k, 0) or 0) > 0]
+    fr_n = sum(int((fr_votes or {}).get(k, 0) or 0) for k in keys)
+    my_n = sum(int((my_votes or {}).get(k, 0) or 0) for k in keys)
+    fr_text = ", ".join(display_label(k) for k in fr_top) if fr_top else "—"
+    my_text = ", ".join(display_label(k) for k in my_voted) if my_voted else "—"
+    return (f"Fragrantica top: {fr_text}  ({fr_n} votes)\n"
+            f"Mine: {my_text}  ({my_n} votes)")
 
 
 # -----------------------------
@@ -1060,6 +1163,215 @@ class RangeSlider(tk.Canvas):
             self.on_change()
 
 
+class MiniSpectrum(ttk.Frame):
+    """Compact spectrum widget for the collapsed-state vote summary.
+
+    Renders a short horizontal line with up to two colored dots (Fragrantica
+    in blue/larger, Personal in orange/smaller, drawn on top). Optional 1-char
+    end labels (e.g. "1" / "5" or "♀" / "♂") flank the line. Hovering anywhere
+    on the widget reveals a short tooltip with the exact scores.
+
+    Pixel dimensions scale with the app's font size via scale_px(); base
+    values below are calibrated for BASE_FONT_SIZE (10).
+    """
+
+    BASE_DOT_FR_R = 5   # Fragrantica filled-circle radius (drawn below)
+    BASE_DOT_MY_R = 4   # Personal filled-circle radius (drawn above).
+                        # Same shape, different sizes: when scores overlap, the
+                        # larger blue circle shows a thin ring around the
+                        # smaller orange circle -- both stay clearly visible.
+    BASE_LINE_W = 110   # Spectrum drawing width in px (at BASE_FONT_SIZE)
+    BASE_LINE_H = 18    # Canvas height (room for circle + a little padding)
+
+    def __init__(self, master, left_label: str = "", right_label: str = "",
+                 score_range=(1.0, 5.0), reverse: bool = False,
+                 font_size: int = BASE_FONT_SIZE, **kwargs):
+        super().__init__(master, style="Panel.TFrame", **kwargs)
+        self.score_min, self.score_max = score_range
+        self.reverse = reverse
+        self.font_size = font_size
+        self._compute_dims()
+
+        self.score_fr = None
+        self.score_my = None
+        self.detail_text = ""
+        self._click_callback = None
+
+        lbl_common = dict(bg=COLORS["panel"], fg=COLORS["muted"], cursor="hand2")
+        self.left_lbl = (tk.Label(self, text=left_label, width=2, **lbl_common)
+                         if left_label else None)
+        if self.left_lbl is not None:
+            self.left_lbl.pack(side="left", padx=(0, 2))
+
+        self.canvas = tk.Canvas(self, width=self.line_w, height=self.line_h,
+                                bg=COLORS["panel"], highlightthickness=0,
+                                cursor="hand2")
+        self.canvas.pack(side="left")
+
+        self.right_lbl = (tk.Label(self, text=right_label, width=2, **lbl_common)
+                          if right_label else None)
+        if self.right_lbl is not None:
+            self.right_lbl.pack(side="left", padx=(2, 0))
+
+        self._tip = ToolTip(self.canvas, delay=TOOLTIP_DELAY_DETAIL)
+        for w in self._all_widgets():
+            w.bind("<Enter>", self._on_enter)
+            w.bind("<Leave>", self._on_leave)
+
+    def _compute_dims(self):
+        """Recompute scaled pixel dimensions from current font_size."""
+        self.line_w = scale_px(self.BASE_LINE_W, self.font_size)
+        self.line_h = scale_px(self.BASE_LINE_H, self.font_size)
+        self.dot_fr_r = scale_px(self.BASE_DOT_FR_R, self.font_size)
+        self.dot_my_r = scale_px(self.BASE_DOT_MY_R, self.font_size)
+
+    def update_font_size(self, font_size: int):
+        """React to a font-size change: resize the canvas and redraw."""
+        self.font_size = font_size
+        self._compute_dims()
+        self.canvas.config(width=self.line_w, height=self.line_h)
+        self._render()
+
+    def _all_widgets(self):
+        widgets = [self.canvas]
+        if self.left_lbl is not None:
+            widgets.append(self.left_lbl)
+        if self.right_lbl is not None:
+            widgets.append(self.right_lbl)
+        return widgets
+
+    def bind_click(self, callback):
+        """Forward a click anywhere on the spectrum to the given callback."""
+        self._click_callback = callback
+        for w in self._all_widgets():
+            w.bind("<Button-1>", lambda e: callback())
+
+    def _score_to_x(self, score: float) -> float:
+        span = self.score_max - self.score_min
+        frac = 0.5 if span <= 0 else (score - self.score_min) / span
+        frac = max(0.0, min(1.0, frac))
+        if self.reverse:
+            frac = 1.0 - frac
+        margin = max(self.dot_fr_r, self.dot_my_r) + 1
+        return margin + frac * (self.line_w - 2 * margin)
+
+    def set_data(self, score_fr, score_my, detail_text: str = ""):
+        """Update scores and redraw. Pass None to omit a dot."""
+        self.score_fr = score_fr
+        self.score_my = score_my
+        self.detail_text = detail_text
+        self._render()
+
+    def _render(self):
+        c = self.canvas
+        c.delete("all")
+        y = self.line_h // 2
+        margin = max(self.dot_fr_r, self.dot_my_r) + 1
+        line_thickness = max(2, scale_px(2, self.font_size))
+        c.create_line(margin, y, self.line_w - margin, y,
+                      fill=COLORS["line"], width=line_thickness, capstyle="round")
+        if self.score_fr is not None:
+            x = self._score_to_x(self.score_fr)
+            r = self.dot_fr_r
+            c.create_oval(x - r, y - r, x + r, y + r,
+                          fill=COLORS["accent"], outline="")
+        if self.score_my is not None:
+            x = self._score_to_x(self.score_my)
+            r = self.dot_my_r
+            c.create_oval(x - r, y - r, x + r, y + r,
+                          fill=COLORS["accent2"], outline="")
+
+    def _on_enter(self, _event):
+        if self.detail_text:
+            self._tip.schedule(self.detail_text)
+
+    def _on_leave(self, _event):
+        self._tip.cancel()
+        self._tip.hide()
+
+
+class WhenToWearStrip(ttk.Frame):
+    """Compact 6-slot strip for the When-to-Wear vote summary.
+
+    Each slot is fixed-width and shows:
+      - blank when neither side has voted for that option (no misleading gray)
+      - blue text when Fragrantica's majority includes it
+      - orange text when the user has voted for it
+      - green text when both agree
+    """
+
+    SLOT_WIDTH = 4   # char width per slot (kept fixed for alignment)
+    KEYS = ["spring", "summer", "fall", "winter", "day", "night"]
+    LABELS = {
+        "spring": "SPR", "summer": "SUM", "fall": "FAL", "winter": "WIN",
+        "day": "DAY", "night": "NGT",
+    }
+
+    def __init__(self, master, font_size: int = BASE_FONT_SIZE, **kwargs):
+        super().__init__(master, style="Panel.TFrame", **kwargs)
+        # Slot width is in char units so it already breathes with the named
+        # fonts; font_size is held only so the parent can call update_font_size
+        # without special-casing this widget.
+        self.font_size = font_size
+        self.detail_text = ""
+        self._click_callback = None
+        self.slot_labels = {}
+        for key in self.KEYS:
+            lbl = tk.Label(self, text="", bg=COLORS["panel"],
+                           fg=COLORS["text"], width=self.SLOT_WIDTH,
+                           anchor="center", cursor="hand2")
+            lbl.pack(side="left")
+            self.slot_labels[key] = lbl
+
+        self._tip = ToolTip(self, delay=TOOLTIP_DELAY_DETAIL)
+        for w in self.slot_labels.values():
+            w.bind("<Enter>", self._on_enter)
+            w.bind("<Leave>", self._on_leave)
+
+    def update_font_size(self, font_size: int):
+        """No-op for now; slot Labels use the named font and auto-rescale.
+
+        Kept as a stable interface so callers can treat MiniSpectrum and
+        WhenToWearStrip uniformly.
+        """
+        self.font_size = font_size
+
+    def bind_click(self, callback):
+        self._click_callback = callback
+        for w in self.slot_labels.values():
+            w.bind("<Button-1>", lambda e: callback())
+
+    def set_data(self, fr_top_keys, my_voted_keys, detail_text: str = ""):
+        """Update per-slot state.
+
+        fr_top_keys / my_voted_keys are iterables of option keys.
+        """
+        fr_set = set(fr_top_keys or [])
+        my_set = set(my_voted_keys or [])
+        for key in self.KEYS:
+            lbl = self.slot_labels[key]
+            in_fr = key in fr_set
+            in_my = key in my_set
+            if in_fr and in_my:
+                lbl.config(text=self.LABELS[key], fg=COLORS["agree"])
+            elif in_fr:
+                lbl.config(text=self.LABELS[key], fg=COLORS["accent"])
+            elif in_my:
+                lbl.config(text=self.LABELS[key], fg=COLORS["accent2"])
+            else:
+                # Truly empty: no text, fixed slot width keeps alignment.
+                lbl.config(text="", fg=COLORS["text"])
+        self.detail_text = detail_text
+
+    def _on_enter(self, _event):
+        if self.detail_text:
+            self._tip.schedule(self.detail_text)
+
+    def _on_leave(self, _event):
+        self._tip.cancel()
+        self._tip.hide()
+
+
 class CollapsibleVoteBlock(ttk.Frame):
     """
     Collapsible vote block with horizontal bars
@@ -1070,7 +1382,7 @@ class CollapsibleVoteBlock(ttk.Frame):
 
     def __init__(self, master, block_name: str, keys: List[str], title: str, 
                  normalize_mode: str, summary_func, on_vote_callback, on_toggle_callback=None, 
-                 global_label_width=100, **kwargs):
+                 global_label_width=100, font_size: int = BASE_FONT_SIZE, **kwargs):
         super().__init__(master, **kwargs)
         self.block_name = block_name
         self.keys = keys
@@ -1080,7 +1392,8 @@ class CollapsibleVoteBlock(ttk.Frame):
         self.on_vote_callback = on_vote_callback
         self.on_toggle_callback = on_toggle_callback
         self.global_label_width = global_label_width
-        
+        self.font_size = font_size
+
         self.expanded = False
         self.perfume_id = None
         self.fr_votes = {}
@@ -1097,19 +1410,63 @@ class CollapsibleVoteBlock(ttk.Frame):
         self.symbol_label.pack(side="left")
         self.symbol_label.bind("<Button-1>", self._on_title_click)
         
-        # Title text (initialized with actual title)
-        self.title_label = tk.Label(self.title_frame, text=f"{title}: —  (No data)", anchor="w",
-                                    bg=COLORS["panel"], fg=COLORS["text"], cursor="hand2")
+        # Title row layout:
+        #   [+/-]  [Title:]  [spectrum or strip widget]  [sample size]
+        # The spectrum/strip is the at-a-glance visual; the textual numbers
+        # for either side are deferred to a hover tooltip on the widget so
+        # the row stays terse and uniformly aligned across all blocks.
+        label_kwargs = dict(bg=COLORS["panel"], cursor="hand2")
+        self.title_label = tk.Label(self.title_frame, text=f"{title}: ",
+                                    anchor="w", fg=COLORS["text"], **label_kwargs)
         self.title_label.pack(side="left")
         self.title_label.bind("<Button-1>", self._on_title_click)
-        
+
+        # Per-block summary widget. When-to-Wear is categorical (6 slots),
+        # everything else is a 1D spectrum with optional endpoint labels.
+        self.summary_widget = self._build_summary_widget()
+        self.summary_widget.pack(side="left", padx=(2, 6))
+        self.summary_widget.bind_click(self._on_title_click_no_arg)
+
+        self.sample_label = tk.Label(self.title_frame, text="(No data)",
+                                     fg=COLORS["text"], **label_kwargs)
+        self.sample_label.pack(side="left")
+        self.sample_label.bind("<Button-1>", self._on_title_click)
+
         # Content frame (shown when expanded)
         self.content_frame = ttk.Frame(self, style="Panel.TFrame")
-        
+
         # Bind resize event to re-render bars
         self.bind("<Configure>", self._on_resize)
         self._last_width = 0
-        
+
+    def _on_title_click_no_arg(self):
+        """Adapter for the summary widgets' bind_click (no event arg)."""
+        self._on_title_click(None)
+
+    def _build_summary_widget(self):
+        """Pick the right at-a-glance widget for this block.
+
+        - season_time_votes -> 6-slot categorical strip
+        - gender_votes      -> reversed spectrum (male on right) with ♀/♂ labels
+        - others (rating/longevity/sillage/value) -> spectrum with 1..N endpoints
+        """
+        if self.block_name == "season_time_votes":
+            return WhenToWearStrip(self.title_frame, font_size=self.font_size)
+        # All numeric blocks now share the same convention:
+        #   keys[0] = top of expanded list = highest score = right of spectrum.
+        # Gender was the historical odd one out; its score encoding has been
+        # flipped (male=5, female=1) so it follows the same rule.
+        score_max = float(len(self.keys))
+        if self.block_name == "gender_votes":
+            left_label, right_label = "♀", "♂"
+        else:
+            left_label, right_label = "1", str(int(score_max))
+        return MiniSpectrum(self.title_frame,
+                            left_label=left_label, right_label=right_label,
+                            score_range=(1.0, score_max),
+                            reverse=False,
+                            font_size=self.font_size)
+
     def _on_resize(self, event):
         """Re-render bars when width changes significantly"""
         current_width = self.winfo_width()
@@ -1126,36 +1483,51 @@ class CollapsibleVoteBlock(ttk.Frame):
         self._render()
     
     def _render(self):
-        # Calculate sample size
+        # Calculate sample size (Fragrantica side, drives the warning)
         if self.normalize_mode == "max":
             sample = sample_size_for_block(self.fr_votes, self.keys, "max")
             sample_type = "max"
         else:
             sample = sample_size_for_block(self.fr_votes, self.keys, "sum")
             sample_type = "votes"
-        
-        # Calculate summary
-        summary = self.summary_func(self.fr_votes, self.keys)
-        
-        # Low sample warning
+
         if sample > 0 and sample < LOW_SAMPLE_THRESHOLD:
             sample_text = f"(⚠ {sample} {sample_type})"
         elif sample > 0:
             sample_text = f"({sample} {sample_type})"
         else:
             sample_text = "(No data)"
-        
-        # Update symbol and title separately to avoid text shifting
+
         symbol = "－" if self.expanded else "＋"
         self.symbol_label.config(text=symbol)
-        self.title_label.config(text=f"{self.title}: {summary}  {sample_text}")
-        
-        # Show/hide content
+        self.sample_label.config(text=sample_text)
+
+        # Feed the summary widget (spectrum or strip) based on block type
+        self._render_summary_widget()
+
+        # Show/hide expanded content
         if self.expanded:
             self.content_frame.pack(fill="x", padx=(20, 0), pady=(2, 8))
             self._render_bars()
         else:
             self.content_frame.pack_forget()
+
+    def _render_summary_widget(self):
+        """Update the at-a-glance widget for both Fragrantica and personal."""
+        if self.block_name == "season_time_votes":
+            fr_top = _when_to_wear_top_keys(self.fr_votes, self.keys)
+            my_voted = [k for k in self.keys
+                        if int(self.my_votes.get(k, 0) or 0) > 0]
+            detail = _format_when_detail(self.fr_votes, self.my_votes, self.keys)
+            self.summary_widget.set_data(fr_top, my_voted, detail)
+            return
+
+        # All other blocks: numeric spectrum
+        fr_score = _weighted_score(self.fr_votes, self.keys, self.block_name)
+        my_score = _weighted_score(self.my_votes, self.keys, self.block_name)
+        detail = _format_score_detail(fr_score, my_score, self.fr_votes,
+                                       self.my_votes, self.keys)
+        self.summary_widget.set_data(fr_score, my_score, detail)
     
     def _render_bars(self):
         # Clear previous content
@@ -1185,7 +1557,13 @@ class CollapsibleVoteBlock(ttk.Frame):
             available_width = 400  # Default
         
         max_bar_width = max(50, available_width - label_width_px - 98)  # 98 = 4 + 8 + 70 + 16 (padding + pct + margin)
-        
+
+        # Scale bar height with font. Base = 18 (canvas) with 2px margins on
+        # top/bottom for the rounded look; everything stays proportional when
+        # the user bumps the font up.
+        bar_canvas_h = scale_px(18, self.font_size)
+        bar_margin_y = max(1, scale_px(2, self.font_size))
+
         for i, key in enumerate(self.keys):
             row = ttk.Frame(self.content_frame, style="Panel.TFrame")
             row.pack(fill="x", pady=1)
@@ -1204,17 +1582,20 @@ class CollapsibleVoteBlock(ttk.Frame):
             
             # Bar canvas
             bar_width = int(fractions[i] * max_bar_width)
-            canvas = tk.Canvas(row, width=max_bar_width, height=18, 
+            canvas = tk.Canvas(row, width=max_bar_width, height=bar_canvas_h,
                              bg=COLORS["panel"], highlightthickness=0)
             canvas.pack(side="left", padx=(4, 8))  # Reduced left padding from 8 to 4
-            
+
             # Draw background track - use accent2_bg for my votes
             track_color = COLORS["accent2_bg"] if is_my_vote else "#3a3a3a"
-            canvas.create_rectangle(0, 2, max_bar_width, 16, fill=track_color, outline="")
-            
+            track_bottom = bar_canvas_h - bar_margin_y
+            canvas.create_rectangle(0, bar_margin_y, max_bar_width, track_bottom,
+                                    fill=track_color, outline="")
+
             # Draw filled bar on top
             if bar_width > 0:
-                canvas.create_rectangle(0, 2, bar_width, 16, fill=bar_color, outline="")
+                canvas.create_rectangle(0, bar_margin_y, bar_width, track_bottom,
+                                        fill=bar_color, outline="")
             
             # Percentage label (right-aligned, width for "100.0%" = 6 chars + margin)
             pct = fractions[i] * 100
@@ -1222,8 +1603,8 @@ class CollapsibleVoteBlock(ttk.Frame):
                                bg=COLORS["panel"], fg=COLORS["text"])
             pct_label.pack(side="left")
     
-    def _on_title_click(self, event):
-        """Toggle expand/collapse"""
+    def _on_title_click(self, event=None):
+        """Toggle expand/collapse (event arg is unused, default for adapter use)"""
         self.expanded = not self.expanded
         if self.on_toggle_callback:
             self.on_toggle_callback(self.block_name, self.expanded)
@@ -1233,6 +1614,19 @@ class CollapsibleVoteBlock(ttk.Frame):
         """User clicked an option to vote"""
         if self.perfume_id and self.on_vote_callback:
             self.on_vote_callback(self.perfume_id, self.block_name, self.keys, key)
+
+    def update_font_size(self, font_size: int):
+        """Propagate a font-size change to the summary widget and bars.
+
+        Named Tk fonts handle Label/Button rescaling automatically, but our
+        Canvas-drawn elements (MiniSpectrum + the vote bars) hold pixel
+        dimensions that must be recomputed here.
+        """
+        self.font_size = font_size
+        if hasattr(self.summary_widget, "update_font_size"):
+            self.summary_widget.update_font_size(font_size)
+        if self.expanded:
+            self._render_bars()
 
 
 class MiniBar(ttk.Frame):
@@ -1516,7 +1910,7 @@ class SortDialog(tk.Toplevel):
 
     def _attach_tooltip(self, widget, text: str):
         """Attach a hover tooltip to a widget using the shared ToolTip class."""
-        tip = ToolTip(widget, delay=500)
+        tip = ToolTip(widget, delay=TOOLTIP_DELAY_BUTTON)
         widget.bind("<Enter>", lambda e: tip.schedule(text))
         widget.bind("<Leave>", lambda e: (tip.cancel(), tip.hide()))
     
@@ -4060,6 +4454,13 @@ class App(tk.Tk):
         # Update Treeview row height based on font size
         if hasattr(self, 'tree'):
             self.tree.configure(style="Treeview")
+
+        # Propagate to Canvas-drawn vote blocks (spectrum dots, bar heights).
+        # Named fonts rescale automatically; pixel dimensions don't, so each
+        # block recomputes scale_px() values and re-renders.
+        if hasattr(self, 'vote_blocks'):
+            for block in self.vote_blocks.values():
+                block.update_font_size(fs)
     
     # ---- UI layout
     def _build_ui(self):
@@ -4338,6 +4739,7 @@ class App(tk.Tk):
                 on_vote_callback=self.set_my_vote,
                 on_toggle_callback=self._on_section_toggle,
                 global_label_width=self.global_label_width,
+                font_size=self.font_size,
                 style="Panel.TFrame"
             )
             block.pack(fill="x", pady=2)
@@ -5023,11 +5425,11 @@ class App(tk.Tk):
         elif dimension == "gender":
             fr = (p.fragrantica or {}).get("gender_votes", {})
             score = calculate_gender_score(fr, GENDER_5)
-            # With male=1, female=5: female_first needs -score, male_first needs score
+            # Encoding is now male=5, female=1 (aligned with all other dimensions).
             if order == "female_first":
-                return (-score,)  # Higher score (female=5) comes first
+                return (score,)   # Lower score (female=1) comes first
             elif order == "male_first":
-                return (score,)  # Lower score (male=1) comes first
+                return (-score,)  # Higher score (male=5) comes first
             else:  # unisex_first (score close to 3.0)
                 return (abs(score - 3.0),)
         
