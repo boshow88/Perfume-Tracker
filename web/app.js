@@ -295,7 +295,7 @@ function renderMiniSpectrum(frScore, myScore, scoreMin, scoreMax, leftLabel, rig
     const myN = myVotes ? keys.reduce((s, k) => s + (parseInt(myVotes[k]) || 0), 0) : 0;
     const frTxt = (frScore !== null && frScore !== undefined) ? `${frScore.toFixed(2)} (${frN} votes)` : '—';
     const myTxt = (myScore !== null && myScore !== undefined) ? `${Math.round(myScore)} (${myN} vote${myN === 1 ? '' : 's'})` : '—';
-    const tip = `Fragrantica: ${frTxt}\nMine: ${myTxt}`;
+    const tip = `Fragrantica: ${frTxt}\nPersonal: ${myTxt}`;
 
     const left = leftLabel ? `<span class="ms-label">${leftLabel}</span>` : '';
     const right = rightLabel ? `<span class="ms-label">${rightLabel}</span>` : '';
@@ -331,7 +331,7 @@ function renderWhenToWearStrip(frTopKeys, myVotedKeys, frVotes, myVotes, keys) {
     const myN = myVotes ? keys.reduce((s, k) => s + (parseInt(myVotes[k]) || 0), 0) : 0;
     const frTxt = frTopKeys && frTopKeys.length ? frTopKeys.map(k => k.replace(/_/g, ' ')).join(', ') : '—';
     const myTxt = myVotedKeys && myVotedKeys.length ? myVotedKeys.map(k => k.replace(/_/g, ' ')).join(', ') : '—';
-    const tip = `Fragrantica top: ${frTxt}  (${frN} votes)\nMine: ${myTxt}  (${myN} votes)`;
+    const tip = `Fragrantica top: ${frTxt}  (${frN} votes)\nPersonal: ${myTxt}  (${myN} votes)`;
 
     return `<span class="when-strip" title="${escapeAttr(tip)}">${slots}</span>`;
 }

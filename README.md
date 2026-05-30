@@ -190,8 +190,8 @@ Centralized management of 5 data types; rename once, update everywhere:
 | Year | From / To entries; leave empty for no bound. Perfumes without a year are excluded when active. |
 | Gender | Multi-select gender preference |
 | Tags | Dropdown + list display, Match Any (OR) / Match All (AND) |
-| Vote Status | Has personal vote / Has Fragrantica data (perfume-level) |
-| Per-dim Vote | Pulldown next to each numeric dim (Rating / Longevity / Sillage / Price Value / Gender): "Any" (default), "Has Fragrantica data", or "Has my vote" — independent of the global Vote Source so e.g. you can sort by a Personal score while only showing perfumes you've actually rated for that dim. |
+| Vote Status | Has Personal vote / Has Fragrantica vote (perfume-level) |
+| Per-dim Vote | Pulldown next to each numeric dim (Rating / Longevity / Sillage / Price Value / Gender): "Any" (default), "Has Fragrantica vote", or "Has Personal vote" — independent of the global Vote Source so e.g. you can sort by a Personal score while only showing perfumes you've actually rated for that dim. |
 
 **Null Handling** (for Score filters):
 - **Include mode**: Perfumes without data are hidden

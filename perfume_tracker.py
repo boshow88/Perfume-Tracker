@@ -199,8 +199,8 @@ class FilterConfig:
 VOTED_STATUS_OPTIONS = ("any", "has_fr", "has_my")
 VOTED_STATUS_LABELS = {
     "any":    "Any",
-    "has_fr": "Has Fragrantica data",
-    "has_my": "Has my vote",
+    "has_fr": "Has Fragrantica vote",
+    "has_my": "Has Personal vote",
 }
 
 
@@ -1018,11 +1018,11 @@ def _format_score_detail(fr_score, my_score, fr_votes, my_votes, keys) -> str:
         lines.append("Fragrantica: —")
     if my_score is not None:
         if my_n > 1:
-            lines.append(f"Mine: {round(my_score)}  ({my_n} votes)")
+            lines.append(f"Personal: {round(my_score)}  ({my_n} votes)")
         else:
-            lines.append(f"Mine: {round(my_score)}")
+            lines.append(f"Personal: {round(my_score)}")
     else:
-        lines.append("Mine: —")
+        lines.append("Personal: —")
     return "\n".join(lines)
 
 
@@ -1035,7 +1035,7 @@ def _format_when_detail(fr_votes, my_votes, keys) -> str:
     fr_text = ", ".join(display_label(k) for k in fr_top) if fr_top else "—"
     my_text = ", ".join(display_label(k) for k in my_voted) if my_voted else "—"
     return (f"Fragrantica top: {fr_text}  ({fr_n} votes)\n"
-            f"Mine: {my_text}  ({my_n} votes)")
+            f"Personal: {my_text}  ({my_n} votes)")
 
 
 # -----------------------------
@@ -3333,9 +3333,9 @@ class FilterDialog(tk.Toplevel):
             lines.append(f"• Tags ({logic}): {', '.join(self.current_config.tags)}")
         
         if self.current_config.has_my_vote:
-            lines.append("• Perfumes I've voted on")
+            lines.append("• Perfumes with Personal vote")
         if self.current_config.has_fragrantica:
-            lines.append("• Perfumes with Fragrantica data")
+            lines.append("• Perfumes with Fragrantica vote")
 
         # Per-dim vote-status (only mention dims that aren't on "any")
         active_status = [
@@ -3825,13 +3825,13 @@ class FilterDialog(tk.Toplevel):
         widgets_data = [
             {
                 'type': 'checkbutton',
-                'text': "Perfumes I've voted on",
+                'text': "Perfumes with Personal vote",
                 'variable': self.var_has_my_vote,
                 'command': self._update_result_count
             },
             {
                 'type': 'checkbutton',
-                'text': "Perfumes with Fragrantica data",
+                'text': "Perfumes with Fragrantica vote",
                 'variable': self.var_has_fragrantica,
                 'command': self._update_result_count
             }
