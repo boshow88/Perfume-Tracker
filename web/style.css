@@ -1288,6 +1288,84 @@ body {
     cursor: pointer;
 }
 
+/* Stacked radio (used in Settings > Vote Source): main label on row 1,
+   description on row 2, both kept visually grouped. */
+.radio-item.radio-stacked {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 8px;
+    align-items: start;
+    padding: 6px 0;
+    color: var(--text-primary);
+}
+
+.radio-item.radio-stacked input {
+    grid-row: 1;
+    grid-column: 1;
+    margin-top: 3px;
+}
+
+.radio-item.radio-stacked .radio-main {
+    grid-row: 1;
+    grid-column: 2;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.radio-item.radio-stacked .radio-desc {
+    grid-row: 2;
+    grid-column: 2;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* Per-dimension voted-status dropdown (sits inside score-filter-item, and
+   above the Gender checkboxes). Mirrors desktop FilterDialog's per-dim
+   "voted_status" OptionMenu. */
+.voted-status-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 6px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.voted-status-label {
+    flex-shrink: 0;
+    font-weight: 400;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+.filter-group select.voted-status-select {
+    flex: 1;
+    width: auto;
+    min-width: 0;
+    min-height: 0;
+    height: auto;
+    padding: 4px 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-card);
+    color: var(--text-primary);
+    font-family: var(--font-body);
+    font-size: 0.8rem;
+    cursor: pointer;
+}
+
+.filter-group select.voted-status-select:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
 .filter-group:last-child {
     margin-bottom: 0;
 }

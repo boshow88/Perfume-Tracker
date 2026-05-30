@@ -38,9 +38,9 @@ A read-only web version for browsing your collection on any device:
 **URL**: https://boshow88.github.io/Perfume-Tracker/web/
 
 **Features**:
-- Search, Filter, Sort (mirrors desktop functionality)
+- Search, Filter, Sort (mirrors desktop functionality, including Vote Source switching and per-dim voted-status filters)
 - View Fragrantica data and personal votes
-- Settings (font size, owned ml formats - temporary, resets on refresh)
+- Settings (font size, owned ml formats, vote source — temporary, resets on refresh)
 - Responsive design for mobile and desktop
 - Real-time sync with your `perfumes.json` data
 

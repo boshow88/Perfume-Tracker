@@ -29,6 +29,7 @@ let selectedPerfumeId = null;
 
 let brandsMap = {};
 let ownedMlIncludeFormats = ['full'];  // Default: only full bottles count
+let voteSource = 'fragrantica';        // 'fragrantica' | 'personal' | 'fallback'
 let concentrationsMap = {};
 let outletsMap = {};
 let tagsMap = {};
@@ -52,6 +53,16 @@ let filters = {
     longevity: { min: 0, max: 5, exclude: false },
     sillage: { min: 0, max: 4, exclude: false },
     value: { min: 0, max: 5, exclude: false },
+    // Per-dimension vote-status gate; mirrors the desktop "voted_status" filter.
+    // 'any' | 'has_fr' (Has Fragrantica vote) | 'has_my' (Has Personal vote).
+    // Independent of the global voteSource — see desktop FilterDialog notes.
+    votedStatus: {
+        rating: 'any',
+        longevity: 'any',
+        sillage: 'any',
+        value: 'any',
+        gender: 'any'
+    },
     // Year range: 0 means no bound on that side
     yearMin: 0,
     yearMax: 0
@@ -184,6 +195,16 @@ async function loadData() {
         noteTitlesMap = appData.note_titles_map || {};
         purchaseTypesMap = appData.purchase_types_map || {};
         ownedMlIncludeFormats = appData.owned_ml_include_formats || ['full'];
+
+        // Vote source for sort/filter (mirrors desktop AppData.vote_source).
+        // Web is read-only: we honour the value the desktop saved, and any
+        // change made via web Settings stays in-memory for this session.
+        const savedSource = appData.vote_source;
+        if (['fragrantica', 'personal', 'fallback'].includes(savedSource)) {
+            voteSource = savedSource;
+        } else {
+            voteSource = 'fragrantica';
+        }
 
         // Apply font size setting (convert pt to px, roughly 1.33x)
         const fontSizePt = appData.font_size || 10;
@@ -342,24 +363,80 @@ function getPerfumeScore(p, voteKey) {
     return calculateScore(p.fragrantica[voteKey], block);
 }
 
+// ============================================
+// Source-aware scoring (mirrors desktop _score_for / _has_voted)
+// ============================================
+// Numeric dim short name -> {key: fragrantica vote dict key, myKey: personal
+// vote dict key, block: VOTE_BLOCKS entry}. Mirrors desktop _NUMERIC_DIM_INFO.
+const NUMERIC_DIM_BLOCKS = {
+    rating:    { key: 'rating_votes',    myKey: 'my_rating_votes' },
+    longevity: { key: 'longevity_votes', myKey: 'my_longevity_votes' },
+    sillage:   { key: 'sillage_votes',   myKey: 'my_sillage_votes' },
+    value:     { key: 'value_votes',     myKey: 'my_value_votes' },
+    gender:    { key: 'gender_votes',    myKey: 'my_gender_votes' }
+};
+
+// Return [frVotesDict, myVotesDict] for a given numeric dim. Always returns
+// objects so callers can sum keys without null checks.
+function voteDicts(p, dim) {
+    const info = NUMERIC_DIM_BLOCKS[dim];
+    if (!info) return [{}, {}];
+    const fr = (p.fragrantica || {})[info.key] || {};
+    const my = (p.my_votes || {})[info.myKey] || {};
+    return [fr, my];
+}
+
+// Sum of vote counts across the dim's keys, on either 'fr' or 'my' side.
+function voteTotal(p, dim, side) {
+    const block = VOTE_BLOCKS.find(b => b.key === NUMERIC_DIM_BLOCKS[dim].key);
+    if (!block) return 0;
+    const [fr, my] = voteDicts(p, dim);
+    const src = side === 'fr' ? fr : my;
+    return block.keys.reduce((s, k) => s + (parseInt(src[k]) || 0), 0);
+}
+
+// Source-aware weighted score for a numeric dim. Returns 0 (not null) when
+// the selected source has no votes -- this preserves the historical
+// "no data sorts to the end on desc / start on asc" and lets score-range
+// filters fall through their existing `score > 0` "has_data" gate.
+//   'fragrantica' : Fragrantica only.
+//   'personal'    : Personal only; 0 when the user hasn't voted.
+//   'fallback'    : Personal where any personal vote exists, else Fragrantica.
+function scoreFor(p, dim) {
+    const block = VOTE_BLOCKS.find(b => b.key === NUMERIC_DIM_BLOCKS[dim]?.key);
+    if (!block) return 0;
+    const [fr, my] = voteDicts(p, dim);
+
+    if (voteSource === 'personal') {
+        return calculateScore(my, block) || 0;
+    }
+    if (voteSource === 'fallback') {
+        const myTotal = block.keys.reduce((s, k) => s + (parseInt(my[k]) || 0), 0);
+        if (myTotal > 0) return calculateScore(my, block) || 0;
+        return calculateScore(fr, block) || 0;
+    }
+    return calculateScore(fr, block) || 0;
+}
+
+// True iff the requested side has any vote on this numeric dim.
+function hasVoted(p, dim, side) {
+    return voteTotal(p, dim, side) > 0;
+}
+
 function checkScoreFilter(p, scoreType, filter, maxVal) {
     // If filter is at default values (full range, not exclude), skip check
     if (filter.min === 0 && filter.max === maxVal && !filter.exclude) {
         return true;
     }
-    
-    // Map scoreType to vote key
-    const voteKeyMap = {
-        rating: 'rating_votes',
-        longevity: 'longevity_votes',
-        sillage: 'sillage_votes',
-        value: 'value_votes'
-    };
-    
-    const score = getPerfumeScore(p, voteKeyMap[scoreType]);
-    const hasData = score !== null && score > 0;
-    const inRange = score !== null && score >= filter.min && score <= filter.max;
-    
+
+    // Use the source-aware score so filters honour the current voteSource
+    // (Fragrantica / Personal / Fallback). scoreFor() returns 0 when the
+    // selected source has no votes, which preserves the existing
+    // "score > 0 = has_data" gate used here.
+    const score = scoreFor(p, scoreType);
+    const hasData = score > 0;
+    const inRange = score >= filter.min && score <= filter.max;
+
     if (filter.exclude) {
         // Exclude mode: reject if has data and in range
         if (hasData && inRange) return false;
@@ -367,7 +444,7 @@ function checkScoreFilter(p, scoreType, filter, maxVal) {
         // Include mode: reject if no data or not in range
         if (!hasData || !inRange) return false;
     }
-    
+
     return true;
 }
 
@@ -415,13 +492,13 @@ function getSortValue(p, field, ascending = true) {
         case 'state':
             return getStatePriority(p);
         case 'rating':
-            return getPerfumeScore(p, 'rating_votes') || 0;
+            return scoreFor(p, 'rating');
         case 'longevity':
-            return getPerfumeScore(p, 'longevity_votes') || 0;
+            return scoreFor(p, 'longevity');
         case 'sillage':
-            return getPerfumeScore(p, 'sillage_votes') || 0;
+            return scoreFor(p, 'sillage');
         case 'value':
-            return getPerfumeScore(p, 'value_votes') || 0;
+            return scoreFor(p, 'value');
         case 'created':
             return p.created_at || '';
         default:
@@ -939,6 +1016,15 @@ function applyFiltersAndSort() {
         if (!checkScoreFilter(p, 'longevity', filters.longevity, 5)) return false;
         if (!checkScoreFilter(p, 'sillage', filters.sillage, 4)) return false;
         if (!checkScoreFilter(p, 'value', filters.value, 5)) return false;
+
+        // Per-dimension vote-status gate (independent of voteSource).
+        // 'has_fr' = require Fragrantica vote; 'has_my' = require Personal
+        // vote; 'any' = no constraint. Mirrors desktop FilterConfig.voted_status.
+        for (const dim of Object.keys(filters.votedStatus || {})) {
+            const status = filters.votedStatus[dim];
+            if (status === 'has_fr' && !hasVoted(p, dim, 'fr')) return false;
+            if (status === 'has_my' && !hasVoted(p, dim, 'my')) return false;
+        }
         
         // Season/Time filter
         if (filters.seasons.length > 0 || filters.times.length > 0) {
@@ -1159,6 +1245,7 @@ function closeAllModals() {
 
 let originalFontSize = 10;
 let originalOwnedFormats = ['full'];
+let originalVoteSource = 'fragrantica';
 
 function openSettingsModal() {
     const modal = document.getElementById('settings-modal');
@@ -1167,6 +1254,7 @@ function openSettingsModal() {
     // Store original values for reset
     originalFontSize = appData.font_size || 10;
     originalOwnedFormats = [...ownedMlIncludeFormats];
+    originalVoteSource = voteSource;
     
     // Set font size slider
     const slider = document.getElementById('settings-font-size');
@@ -1185,6 +1273,11 @@ function openSettingsModal() {
             </label>
         `;
     }
+
+    // Restore vote source radio
+    document.querySelectorAll('#settings-vote-source input[name="vote-source"]').forEach(r => {
+        r.checked = (r.value === voteSource);
+    });
 }
 
 function previewFontSize() {
@@ -1198,9 +1291,15 @@ function applySettings() {
     // Get selected owned formats
     const checkboxes = document.querySelectorAll('#settings-owned-formats input:checked');
     ownedMlIncludeFormats = Array.from(checkboxes).map(cb => cb.value);
-    
+
+    // Get selected vote source
+    const sourceInput = document.querySelector('#settings-vote-source input[name="vote-source"]:checked');
+    if (sourceInput && ['fragrantica', 'personal', 'fallback'].includes(sourceInput.value)) {
+        voteSource = sourceInput.value;
+    }
+
     closeAllModals();
-    applyFiltersAndSort();  // Refresh list with new owned ml calculation
+    applyFiltersAndSort();  // Refresh list with new owned ml + vote source
 }
 
 function resetSettings() {
@@ -1214,6 +1313,12 @@ function resetSettings() {
     // Update checkboxes
     document.querySelectorAll('#settings-owned-formats input').forEach(cb => {
         cb.checked = ownedMlIncludeFormats.includes(cb.value);
+    });
+
+    // Reset vote source radio
+    voteSource = originalVoteSource;
+    document.querySelectorAll('#settings-vote-source input[name="vote-source"]').forEach(r => {
+        r.checked = (r.value === voteSource);
     });
 }
 
@@ -1369,7 +1474,18 @@ function openFilterModal() {
                 item.classList.remove('excluded');
             }
         }
+        // Restore per-dim voted_status dropdown
+        const vs = item.querySelector('.voted-status-select');
+        if (vs) {
+            vs.value = (filters.votedStatus && filters.votedStatus[scoreType]) || 'any';
+        }
     });
+
+    // Restore gender voted_status
+    const genderVoted = document.getElementById('filter-gender-voted');
+    if (genderVoted) {
+        genderVoted.value = (filters.votedStatus && filters.votedStatus.gender) || 'any';
+    }
     
     setSelectValues('filter-brand', filters.brands);
     setSelectValues('filter-concentration', filters.concentrations);
@@ -1409,7 +1525,7 @@ function applyFilters() {
     filters.hasMyVote = voteStatusChecked.includes('has_my_vote');
     filters.hasFragrantica = voteStatusChecked.includes('has_fragrantica');
     
-    // Get score range values
+    // Get score range values + per-dim voted_status
     document.querySelectorAll('.score-filter-item').forEach(item => {
         const scoreType = item.dataset.score;
         filters[scoreType] = {
@@ -1417,7 +1533,17 @@ function applyFilters() {
             max: parseFloat(item.querySelector('.range-max').value),
             exclude: item.querySelector('.score-exclude').checked
         };
+        const vs = item.querySelector('.voted-status-select');
+        if (vs) {
+            filters.votedStatus[scoreType] = vs.value || 'any';
+        }
     });
+
+    // Gender per-dim voted_status (lives outside the score-filter-item grid)
+    const genderVoted = document.getElementById('filter-gender-voted');
+    if (genderVoted) {
+        filters.votedStatus.gender = genderVoted.value || 'any';
+    }
     
     filters.brands = getSelectValues('filter-brand');
     filters.concentrations = getSelectValues('filter-concentration');
@@ -1455,6 +1581,13 @@ function clearFilters() {
         longevity: { min: 0, max: 5, exclude: false },
         sillage: { min: 0, max: 4, exclude: false },
         value: { min: 0, max: 5, exclude: false },
+        votedStatus: {
+            rating: 'any',
+            longevity: 'any',
+            sillage: 'any',
+            value: 'any',
+            gender: 'any'
+        },
         yearMin: 0,
         yearMax: 0
     };
@@ -1477,7 +1610,13 @@ function clearFilters() {
         item.querySelector('.range-selected').style.left = '0%';
         item.querySelector('.range-selected').style.width = '100%';
         item.classList.remove('excluded');
+        const vs = item.querySelector('.voted-status-select');
+        if (vs) vs.value = 'any';
     });
+
+    // Reset gender voted-status dropdown
+    const genderVoted = document.getElementById('filter-gender-voted');
+    if (genderVoted) genderVoted.value = 'any';
     
     // Clear select boxes
     ['filter-brand', 'filter-concentration', 'filter-location', 'filter-tag'].forEach(id => {
@@ -1548,6 +1687,10 @@ function updateFilterButtonState() {
         filters.value.min > 0 || filters.value.max < 5 || filters.value.exclude
     );
     
+    // Per-dim voted_status (any non-'any' value counts as an active filter)
+    const hasVotedStatusFilter = Object.values(filters.votedStatus || {})
+        .some(v => v && v !== 'any');
+
     const hasFilters = filters.states.length > 0 ||
                        filters.seasons.length > 0 ||
                        filters.times.length > 0 ||
@@ -1560,7 +1703,8 @@ function updateFilterButtonState() {
                        filters.tags.length > 0 ||
                        filters.yearMin > 0 ||
                        filters.yearMax > 0 ||
-                       hasScoreFilter;
+                       hasScoreFilter ||
+                       hasVotedStatusFilter;
     btn.classList.toggle('active', hasFilters);
 }
 

@@ -194,6 +194,14 @@
                                     <span class="range-value-min">0</span>
                                     <span class="range-value-max">5</span>
                                 </div>
+                                <div class="voted-status-row">
+                                    <label class="voted-status-label">Vote:</label>
+                                    <select class="voted-status-select">
+                                        <option value="any">Any</option>
+                                        <option value="has_fr">Has Fragrantica vote</option>
+                                        <option value="has_my">Has Personal vote</option>
+                                    </select>
+                                </div>
                             </div>
                             <div class="score-filter-item" data-score="longevity" data-max="5">
                                 <div class="score-filter-header">
@@ -211,6 +219,14 @@
                                 <div class="range-values">
                                     <span class="range-value-min">0</span>
                                     <span class="range-value-max">5</span>
+                                </div>
+                                <div class="voted-status-row">
+                                    <label class="voted-status-label">Vote:</label>
+                                    <select class="voted-status-select">
+                                        <option value="any">Any</option>
+                                        <option value="has_fr">Has Fragrantica vote</option>
+                                        <option value="has_my">Has Personal vote</option>
+                                    </select>
                                 </div>
                             </div>
                             <div class="score-filter-item" data-score="sillage" data-max="4">
@@ -230,6 +246,14 @@
                                     <span class="range-value-min">0</span>
                                     <span class="range-value-max">4</span>
                                 </div>
+                                <div class="voted-status-row">
+                                    <label class="voted-status-label">Vote:</label>
+                                    <select class="voted-status-select">
+                                        <option value="any">Any</option>
+                                        <option value="has_fr">Has Fragrantica vote</option>
+                                        <option value="has_my">Has Personal vote</option>
+                                    </select>
+                                </div>
                             </div>
                             <div class="score-filter-item" data-score="value" data-max="5">
                                 <div class="score-filter-header">
@@ -247,6 +271,14 @@
                                 <div class="range-values">
                                     <span class="range-value-min">0</span>
                                     <span class="range-value-max">5</span>
+                                </div>
+                                <div class="voted-status-row">
+                                    <label class="voted-status-label">Vote:</label>
+                                    <select class="voted-status-select">
+                                        <option value="any">Any</option>
+                                        <option value="has_fr">Has Fragrantica vote</option>
+                                        <option value="has_my">Has Personal vote</option>
+                                    </select>
                                 </div>
                             </div>
                         </div>
@@ -303,6 +335,14 @@
                     <!-- Gender Filter -->
                     <div class="filter-group">
                         <label>Gender</label>
+                        <div class="voted-status-row" id="filter-gender-voted-row">
+                            <label class="voted-status-label">Vote:</label>
+                            <select class="voted-status-select" id="filter-gender-voted">
+                                <option value="any">Any</option>
+                                <option value="has_fr">Has Fragrantica vote</option>
+                                <option value="has_my">Has Personal vote</option>
+                            </select>
+                        </div>
                         <div class="checkbox-group" id="filter-gender">
                             <label class="checkbox-item">
                                 <input type="checkbox" value="male"> Male
@@ -391,6 +431,27 @@
                             <!-- Populated by JS -->
                         </div>
                         <p class="hint">Only checked formats count toward Owned ml</p>
+                    </div>
+                    <div class="filter-group">
+                        <label>Vote Source for Sort & Filter</label>
+                        <p class="hint">Which side of the data drives Sort and the score-range Filters?</p>
+                        <div class="radio-group" id="settings-vote-source">
+                            <label class="radio-item radio-stacked">
+                                <input type="radio" name="vote-source" value="fragrantica">
+                                <span class="radio-main">Fragrantica</span>
+                                <span class="radio-desc">Use the crowd-sourced Fragrantica scores. (Default.)</span>
+                            </label>
+                            <label class="radio-item radio-stacked">
+                                <input type="radio" name="vote-source" value="personal">
+                                <span class="radio-main">Personal</span>
+                                <span class="radio-desc">Use only your own votes. Perfumes you haven't voted on for a given dimension are treated as having no data on that dimension.</span>
+                            </label>
+                            <label class="radio-item radio-stacked">
+                                <input type="radio" name="vote-source" value="fallback">
+                                <span class="radio-main">Fallback (Personal, then Fragrantica)</span>
+                                <span class="radio-desc">Use your own vote when you've voted on this dimension; otherwise fall back to the Fragrantica score.</span>
+                            </label>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
