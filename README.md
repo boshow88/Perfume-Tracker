@@ -190,7 +190,8 @@ Centralized management of 5 data types; rename once, update everywhere:
 | Year | From / To entries; leave empty for no bound. Perfumes without a year are excluded when active. |
 | Gender | Multi-select gender preference |
 | Tags | Dropdown + list display, Match Any (OR) / Match All (AND) |
-| Vote Status | Has personal vote / Has Fragrantica data |
+| Vote Status | Has personal vote / Has Fragrantica data (perfume-level) |
+| Per-dim Vote | Pulldown next to each numeric dim (Rating / Longevity / Sillage / Price Value / Gender): "Any" (default), "Has Fragrantica data", or "Has my vote" — independent of the global Vote Source so e.g. you can sort by a Personal score while only showing perfumes you've actually rated for that dim. |
 
 **Null Handling** (for Score filters):
 - **Include mode**: Perfumes without data are hidden
@@ -305,6 +306,7 @@ Manage in the Memo dialog:
 | Owned ml Formats | Which purchase types count toward the "Owned ml" derived value |
 | Auto-detect year on Fragrantica import | When enabled, attempts to extract the release year from imported Fragrantica text. The detected year fills the Year entry in the Fragrantica dialog (overwrite confirmation if a different value was already there). The change is committed only when you press Save. |
 | Insert position when sort is active | Where a newly added perfume goes in the **real (manual) order** when a sort is active: **Below selected** (default) / **Append to end** / **Match sort view position** |
+| Vote Source for Sort & Filter | Which side of the data drives Sort and the score-range Filters for Rating / Longevity / Sillage / Price Value / Gender: **Fragrantica** (default, crowd numbers), **Personal** (only your votes; missing votes count as no data), or **Fallback** (Personal where you've voted, Fragrantica otherwise). Other filters (When-to-Wear, "Has data", gender preference) are unaffected. |
 
 ---
 

@@ -181,6 +181,27 @@ class FilterConfig:
     # When active, perfumes with year=0 (unset) are excluded.
     year_min: int = 0
     year_max: int = 0
+    # Per-dimension vote-status gate. Independent of AppData.vote_source: lets
+    # the user say "only show perfumes that have a Fragrantica score for X" or
+    # "only show ones I've personally voted on for X". Values per dim:
+    #   "any"     - default, no constraint
+    #   "has_fr"  - require Fragrantica votes on this dimension
+    #   "has_my"  - require a personal vote on this dimension
+    voted_status: Dict[str, str] = field(default_factory=lambda: {
+        "rating": "any",
+        "longevity": "any",
+        "sillage": "any",
+        "value": "any",
+        "gender": "any",
+    })
+
+
+VOTED_STATUS_OPTIONS = ("any", "has_fr", "has_my")
+VOTED_STATUS_LABELS = {
+    "any":    "Any",
+    "has_fr": "Has Fragrantica data",
+    "has_my": "Has my vote",
+}
 
 
 @dataclass
@@ -288,6 +309,16 @@ class AppData:
         "year": False,
         "locations": True,
     })
+    # Which side of the data drives sort ranking and score-range filters.
+    #   "fragrantica" : crowd numbers (the historical default)
+    #   "personal"    : the user's own votes only; missing votes count as 0
+    #   "fallback"    : personal where the user has voted, Fragrantica otherwise
+    # When-to-Wear / "Has data" / gender-preference filters ignore this and
+    # behave as before -- they aren't weighted-score comparisons.
+    vote_source: str = "fragrantica"
+
+
+VOTE_SOURCES = ("fragrantica", "personal", "fallback")
 
 
 # Default values for new data types
@@ -550,6 +581,12 @@ def load_app_data() -> AppData:
     else:
         app_data.sort_active_insert_position = "below_selected"
     app_data.import_year_from_fragrantica = bool(raw.get("import_year_from_fragrantica", True))
+
+    # Vote source preference (Fragrantica / Personal / Fallback). Default is
+    # the historical behaviour (Fragrantica). Unrecognised values fall back
+    # so a hand-edited or older file can never wedge the app.
+    raw_source = raw.get("vote_source", "fragrantica")
+    app_data.vote_source = raw_source if raw_source in VOTE_SOURCES else "fragrantica"
     
     # Column visibility (merge with defaults so new optional columns get sensible defaults)
     saved_cv = raw.get("column_visibility", {}) or {}
@@ -670,6 +707,7 @@ def save_app_data(app_data: AppData):
         "sort_active_insert_position": app_data.sort_active_insert_position,
         "import_year_from_fragrantica": app_data.import_year_from_fragrantica,
         "column_visibility": app_data.column_visibility,
+        "vote_source": app_data.vote_source,
     }
     
     with open(DB_PATH, "w", encoding="utf-8") as f:
@@ -3073,6 +3111,16 @@ class FilterDialog(tk.Toplevel):
         self.var_year_min = tk.StringVar(value=str(current_config.year_min) if current_config.year_min > 0 else "")
         self.var_year_max = tk.StringVar(value=str(current_config.year_max) if current_config.year_max > 0 else "")
         self.tags_selected = list(current_config.tags)
+
+        # Per-dimension vote-status filter selection. The StringVar holds the
+        # *display label* so the OptionMenu can bind to it directly; the
+        # internal code is recovered on read via VOTED_STATUS_LABELS.
+        existing_status = current_config.voted_status or {}
+        self.vars_voted_status: Dict[str, tk.StringVar] = {
+            dim: tk.StringVar(value=VOTED_STATUS_LABELS.get(
+                existing_status.get(dim, "any"), VOTED_STATUS_LABELS["any"]))
+            for dim in ("rating", "longevity", "sillage", "value", "gender")
+        }
         
         self._build_ui()
         self._update_result_count()
@@ -3288,7 +3336,22 @@ class FilterDialog(tk.Toplevel):
             lines.append("• Perfumes I've voted on")
         if self.current_config.has_fragrantica:
             lines.append("• Perfumes with Fragrantica data")
-        
+
+        # Per-dim vote-status (only mention dims that aren't on "any")
+        active_status = [
+            (dim, status)
+            for dim, status in (self.current_config.voted_status or {}).items()
+            if status in ("has_fr", "has_my")
+        ]
+        if active_status:
+            dim_label = {
+                "rating": "Rating", "longevity": "Longevity",
+                "sillage": "Sillage", "value": "Price Value", "gender": "Gender",
+            }
+            for dim, status in active_status:
+                lines.append(f"• {dim_label.get(dim, dim)} vote: "
+                             f"{VOTED_STATUS_LABELS.get(status, status)}")
+
         if self.current_config.year_min > 0 or self.current_config.year_max > 0:
             lo = self.current_config.year_min if self.current_config.year_min > 0 else "—"
             hi = self.current_config.year_max if self.current_config.year_max > 0 else "—"
@@ -3552,37 +3615,53 @@ class FilterDialog(tk.Toplevel):
     
     def _create_scores_section(self, parent):
         """Create score range sliders with dual handles and include/exclude option"""
+        # Each entry now also carries the dim key used by the per-dim
+        # vote-status dropdown (must match FilterConfig.voted_status keys).
         scores = [
-            ("Rating", self.var_rating_min, self.var_rating_max, self.var_rating_exclude, 0, 5),
-            ("Longevity", self.var_longevity_min, self.var_longevity_max, self.var_longevity_exclude, 0, 5),
-            ("Sillage", self.var_sillage_min, self.var_sillage_max, self.var_sillage_exclude, 0, 4),
-            ("Price Value", self.var_value_min, self.var_value_max, self.var_value_exclude, 0, 5),
+            ("Rating",      "rating",    self.var_rating_min,    self.var_rating_max,    self.var_rating_exclude,    0, 5),
+            ("Longevity",   "longevity", self.var_longevity_min, self.var_longevity_max, self.var_longevity_exclude, 0, 5),
+            ("Sillage",     "sillage",   self.var_sillage_min,   self.var_sillage_max,   self.var_sillage_exclude,   0, 4),
+            ("Price Value", "value",     self.var_value_min,     self.var_value_max,     self.var_value_exclude,     0, 5),
         ]
-        
+
         # Store label references for updates
         self.score_labels = {}
-        
-        for label, var_min, var_max, var_exclude, range_min, range_max in scores:
+
+        # Compose the values shown by the OptionMenu in display order. The
+        # internal status code is stored in vars_voted_status; this list is
+        # the visible label list (kept in sync via _voted_status_*_helpers).
+        status_display_values = [VOTED_STATUS_LABELS[s] for s in VOTED_STATUS_OPTIONS]
+
+        for label, dim, var_min, var_max, var_exclude, range_min, range_max in scores:
             frame = ttk.Frame(parent, style="Panel.TFrame")
             frame.pack(fill="x", pady=4)
-            
-            # Row 1: Label and Exclude checkbox
+
+            # Row 1: Label and Exclude checkbox + value labels + voted-status pulldown
             row1 = ttk.Frame(frame, style="Panel.TFrame")
             row1.pack(fill="x")
-            
+
             ttk.Label(row1, text=f"{label}:", style="Panel.TLabel", width=12).pack(side="left")
             ttk.Checkbutton(row1, text="Exclude", variable=var_exclude,
                            command=self._update_result_count).pack(side="left", padx=(0, 8))
-            
+
             # Value labels
             min_label = ttk.Label(row1, text=f"{var_min.get():.1f}", style="Panel.TLabel", width=4)
             min_label.pack(side="left")
             ttk.Label(row1, text="~", style="Panel.TLabel").pack(side="left", padx=4)
             max_label = ttk.Label(row1, text=f"{var_max.get():.1f}", style="Panel.TLabel", width=4)
             max_label.pack(side="left")
-            
+
             self.score_labels[label] = (min_label, max_label)
-            
+
+            # Per-dim vote-status pulldown lives on the right of the row, so
+            # it doesn't compete for space with the slider on row 2.
+            status_var = self.vars_voted_status[dim]
+            status_menu = ttk.OptionMenu(row1, status_var, status_var.get(),
+                                         *status_display_values,
+                                         command=lambda *_: self._update_result_count())
+            status_menu.pack(side="right")
+            ttk.Label(row1, text="Vote:", style="Panel.TLabel").pack(side="right", padx=(0, 4))
+
             # Row 2: Range slider
             def make_update_callback(lbl, min_lbl, max_lbl, v_min, v_max):
                 def callback():
@@ -3590,8 +3669,8 @@ class FilterDialog(tk.Toplevel):
                     max_lbl.config(text=f"{v_max.get():.1f}")
                     self._update_result_count()
                 return callback
-            
-            slider = RangeSlider(frame, from_=range_min, to=range_max, 
+
+            slider = RangeSlider(frame, from_=range_min, to=range_max,
                                var_min=var_min, var_max=var_max,
                                width=250, height=24, bg=COLORS["panel"],
                                on_change=make_update_callback(label, min_label, max_label, var_min, var_max))
@@ -3607,6 +3686,19 @@ class FilterDialog(tk.Toplevel):
             ("more_female", "More Female"),
             ("female", "Female"),
         ]
+
+        # Per-dim Vote pulldown for the Gender dimension. Sits above the
+        # multi-select so it's visually parallel to the per-dim pulldowns
+        # in the score-range rows above.
+        status_var = self.vars_voted_status["gender"]
+        status_display_values = [VOTED_STATUS_LABELS[s] for s in VOTED_STATUS_OPTIONS]
+
+        status_row = ttk.Frame(parent, style="Panel.TFrame")
+        status_row.pack(fill="x", pady=(0, 6))
+        ttk.Label(status_row, text="Vote:", style="Panel.TLabel").pack(side="left", padx=(0, 4))
+        ttk.OptionMenu(status_row, status_var, status_var.get(),
+                       *status_display_values,
+                       command=lambda *_: self._update_result_count()).pack(side="left")
         
         # Batch buttons
         btns = ttk.Frame(parent, style="Panel.TFrame")
@@ -3802,6 +3894,13 @@ class FilterDialog(tk.Toplevel):
     
     def _build_config(self) -> FilterConfig:
         """Build filter config from current UI state"""
+        # Reverse VOTED_STATUS_LABELS so we can recover the internal code from
+        # the StringVar's display text.
+        label_to_code = {v: k for k, v in VOTED_STATUS_LABELS.items()}
+        voted_status = {
+            dim: label_to_code.get(var.get(), "any")
+            for dim, var in self.vars_voted_status.items()
+        }
         return FilterConfig(
             brands=list(self.brands_selected),
             concentrations=list(self.concentrations_selected),
@@ -3828,6 +3927,7 @@ class FilterDialog(tk.Toplevel):
             has_fragrantica=self.var_has_fragrantica.get(),
             year_min=_parse_year_str(self.var_year_min.get()),
             year_max=_parse_year_str(self.var_year_max.get()),
+            voted_status=voted_status,
         )
     
     def _count_matches(self, config: FilterConfig) -> int:
@@ -3876,10 +3976,19 @@ class FilterDialog(tk.Toplevel):
             if not matches_when:
                 return False
         
+        # Score lookups go through the app's source-aware helper so the
+        # live preview count matches what the actual list filter will
+        # produce. Falls back to a Fragrantica-only path when the dialog
+        # is opened standalone (no app reference).
+        def score_for(dim, fr_key, score_fn, score_keys):
+            if self.app and hasattr(self.app, "_score_for"):
+                return self.app._score_for(p, dim)
+            fr = (p.fragrantica or {}).get(fr_key, {})
+            return score_fn(fr, score_keys)
+
         # Rating (range with include/exclude)
         if config.rating_min > 0 or config.rating_max < 5.0 or config.rating_exclude:
-            fr = (p.fragrantica or {}).get("rating_votes", {})
-            score = calculate_rating_score(fr, RATING_5)
+            score = score_for("rating", "rating_votes", calculate_rating_score, RATING_5)
             in_range = config.rating_min <= score <= config.rating_max
             if config.rating_exclude:
                 if in_range:
@@ -3890,8 +3999,7 @@ class FilterDialog(tk.Toplevel):
         
         # Longevity (range with include/exclude)
         if config.longevity_min > 0 or config.longevity_max < 5.0 or config.longevity_exclude:
-            fr = (p.fragrantica or {}).get("longevity_votes", {})
-            score = calculate_longevity_score(fr, LONGEVITY_5)
+            score = score_for("longevity", "longevity_votes", calculate_longevity_score, LONGEVITY_5)
             in_range = config.longevity_min <= score <= config.longevity_max
             if config.longevity_exclude:
                 if in_range:
@@ -3902,8 +4010,7 @@ class FilterDialog(tk.Toplevel):
         
         # Sillage (range with include/exclude)
         if config.sillage_min > 0 or config.sillage_max < 4.0 or config.sillage_exclude:
-            fr = (p.fragrantica or {}).get("sillage_votes", {})
-            score = calculate_sillage_score(fr, SILLAGE_4)
+            score = score_for("sillage", "sillage_votes", calculate_sillage_score, SILLAGE_4)
             in_range = config.sillage_min <= score <= config.sillage_max
             if config.sillage_exclude:
                 if in_range:
@@ -3914,8 +4021,7 @@ class FilterDialog(tk.Toplevel):
         
         # Value (range with include/exclude)
         if config.value_min > 0 or config.value_max < 5.0 or config.value_exclude:
-            fr = (p.fragrantica or {}).get("value_votes", {})
-            score = calculate_value_score(fr, VALUE_5)
+            score = score_for("value", "value_votes", calculate_value_score, VALUE_5)
             in_range = config.value_min <= score <= config.value_max
             if config.value_exclude:
                 if in_range:
@@ -3955,6 +4061,16 @@ class FilterDialog(tk.Toplevel):
         if config.has_fragrantica:
             if not p.fragrantica or not any(p.fragrantica.values()):
                 return False
+
+        # Per-dimension vote-status gate (mirrors App._matches_filter so the
+        # preview count agrees with the actual filter result).
+        if self.app and hasattr(self.app, "_has_voted"):
+            for dim, status in (config.voted_status or {}).items():
+                if status == "any" or status not in VOTED_STATUS_OPTIONS:
+                    continue
+                side = "fr" if status == "has_fr" else "my"
+                if not self.app._has_voted(p, dim, side):
+                    return False
         
         # Year range
         if config.year_min > 0 or config.year_max > 0:
@@ -4004,6 +4120,9 @@ class FilterDialog(tk.Toplevel):
         self.var_has_fragrantica.set(False)
         self.var_year_min.set("")
         self.var_year_max.set("")
+        # Reset per-dim vote-status pulldowns back to "Any"
+        for var in self.vars_voted_status.values():
+            var.set(VOTED_STATUS_LABELS["any"])
         self._update_result_count()
         self._update_active_text()
     
@@ -4046,10 +4165,19 @@ class SettingsDialog(tk.Toplevel):
         
         self._build_ui()
         
-        # Auto-size window to fit content, then prevent resize
+        # Size policy: lock width (text wraps to it), allow vertical resize so
+        # the user can drag the dialog taller if they prefer over using the
+        # scrollbar. Initial height is capped to a portion of the screen so
+        # Save / Cancel are always reachable on small displays.
         self.update_idletasks()
-        self.minsize(self.winfo_width(), self.winfo_height())
-        self.resizable(False, False)
+        natural_w = self.winfo_reqwidth()
+        natural_h = self.winfo_reqheight()
+        screen_h = self.winfo_screenheight()
+        max_h = max(420, screen_h - 160)   # leave room for taskbar etc.
+        init_h = min(natural_h, max_h)
+        self.geometry(f"{natural_w}x{init_h}")
+        self.minsize(natural_w, 420)
+        self.resizable(False, True)
         
         # Handle window close (X button) as Cancel
         self.protocol("WM_DELETE_WINDOW", self._on_cancel)
@@ -4061,11 +4189,58 @@ class SettingsDialog(tk.Toplevel):
         self.geometry("")
     
     def _build_ui(self):
-        main = ttk.Frame(self, style="TFrame")
-        main.pack(fill="both", expand=True, padx=20, pady=20)
-        
-        # Title
-        ttk.Label(main, text="Settings", style="TLabel", font=self.app.font_title).pack(anchor="w", pady=(0, 14))
+        # Outer layout: button bar pinned to bottom, everything else in a
+        # scrollable Canvas. Pack the bottom bar FIRST so it always claims
+        # its space when the window shrinks -- the Canvas above absorbs the
+        # remainder and grows the scrollbar instead of pushing the buttons
+        # off-screen.
+        btn_frame = ttk.Frame(self, style="TFrame")
+        btn_frame.pack(side="bottom", fill="x", padx=20, pady=(0, 16))
+        ttk.Button(btn_frame, text="Save", command=self._on_save).pack(side="right")
+        ttk.Button(btn_frame, text="Cancel", command=self._on_cancel).pack(side="right", padx=(0, 8))
+
+        # Scrollable region for the section list.
+        scroll_canvas = tk.Canvas(self, bg=COLORS["bg"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(self, orient="vertical", command=scroll_canvas.yview)
+        scroll_canvas.configure(yscrollcommand=scrollbar.set)
+        scroll_canvas.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=(20, 0))
+        scrollbar.pack(side="right", fill="y", padx=(0, 20), pady=(20, 0))
+
+        main = ttk.Frame(scroll_canvas, style="TFrame")
+        canvas_window = scroll_canvas.create_window((0, 0), window=main, anchor="nw")
+
+        def _on_canvas_configure(event):
+            # Keep the inner frame's width matched to the canvas so the
+            # wraplength labels don't overflow horizontally.
+            scroll_canvas.itemconfig(canvas_window, width=event.width)
+
+        scroll_canvas.bind("<Configure>", _on_canvas_configure)
+        main.bind("<Configure>", lambda e: scroll_canvas.configure(scrollregion=scroll_canvas.bbox("all")))
+
+        # Mouse wheel: only scroll when content actually overflows (otherwise
+        # the wheel does nothing instead of bouncing against the boundary).
+        def _on_mousewheel(event):
+            try:
+                if not scroll_canvas.winfo_exists():
+                    return
+                bbox = scroll_canvas.bbox("all")
+                if not bbox:
+                    return
+                content_h = bbox[3] - bbox[1]
+                if content_h <= scroll_canvas.winfo_height():
+                    scroll_canvas.yview_moveto(0)
+                    return
+                scroll_canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+            except tk.TclError:
+                pass
+
+        scroll_canvas.bind("<Enter>", lambda e: scroll_canvas.bind_all("<MouseWheel>", _on_mousewheel))
+        scroll_canvas.bind("<Leave>", lambda e: scroll_canvas.unbind_all("<MouseWheel>"))
+
+        # Title (right padding leaves room for the scrollbar)
+        ttk.Label(main, text="Settings", style="TLabel", font=self.app.font_title).pack(
+            anchor="w", pady=(0, 14), padx=(0, 8)
+        )
         
         # === Section: Font Size (Appearance) ===
         appearance_frame = ttk.LabelFrame(main, text=" Appearance ", style="TLabelframe")
@@ -4132,6 +4307,39 @@ class SettingsDialog(tk.Toplevel):
                  text="When importing Fragrantica text, attempt to extract the release year. "
                       "Existing year values will only be overwritten after confirmation.",
                  style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w", padx=8, pady=(0, 4))
+
+        # === Section: Vote Source for Sort & Filter ===
+        # Affects how the app picks a numeric score when sorting or filtering
+        # by Rating / Longevity / Sillage / Price Value / Gender. Other
+        # filters (When-to-Wear, "Has data", gender preference) are
+        # unaffected because they aren't weighted-score comparisons.
+        source_frame = ttk.LabelFrame(main, text=" Vote Source for Sort & Filter ",
+                                      style="TLabelframe")
+        source_frame.pack(fill="x", pady=(0, 12), ipadx=8, ipady=6)
+
+        ttk.Label(source_frame,
+                  text="Which side of the data drives Sort and the score-range Filters?",
+                  style="TLabel", wraplength=420, justify="left").pack(anchor="w", padx=8, pady=(4, 6))
+
+        self.vote_source_var = tk.StringVar(value=self.app.app_data.vote_source)
+        source_options = [
+            ("fragrantica", "Fragrantica",
+             "Use the crowd-sourced Fragrantica scores. (Default; the historical behaviour.)"),
+            ("personal", "Personal",
+             "Use only your own votes. Perfumes you haven't voted on for a "
+             "given dimension are treated as having no data on that dimension."),
+            ("fallback", "Fallback (Personal, then Fragrantica)",
+             "Use your own vote when you've voted on this dimension; otherwise "
+             "fall back to the Fragrantica score. Only treats data as missing "
+             "when neither side has any."),
+        ]
+        for value, label, desc in source_options:
+            opt_row = ttk.Frame(source_frame, style="TFrame")
+            opt_row.pack(fill="x", padx=12, pady=(2, 0))
+            ttk.Radiobutton(opt_row, text=label, variable=self.vote_source_var,
+                            value=value, style="TRadiobutton").pack(anchor="w")
+            ttk.Label(opt_row, text=desc, style="Muted.TLabel",
+                      wraplength=400, justify="left").pack(anchor="w", padx=(24, 0), pady=(0, 2))
         
         # === Section: Insert Position ===
         insert_frame = ttk.LabelFrame(main, text=" New Perfume Insert Position ", style="TLabelframe")
@@ -4153,12 +4361,6 @@ class SettingsDialog(tk.Toplevel):
                            style="TRadiobutton").pack(anchor="w")
             ttk.Label(opt_row, text=desc, style="Muted.TLabel",
                      wraplength=400, justify="left").pack(anchor="w", padx=(24, 0), pady=(0, 2))
-        
-        # === Save / Cancel buttons ===
-        btn_frame = ttk.Frame(main, style="TFrame")
-        btn_frame.pack(fill="x", pady=(8, 0))
-        ttk.Button(btn_frame, text="Save", command=self._on_save).pack(side="right")
-        ttk.Button(btn_frame, text="Cancel", command=self._on_cancel).pack(side="right", padx=(0, 8))
     
     def _on_font_preview(self, event=None):
         """Preview font size change (don't save yet)"""
@@ -4182,6 +4384,10 @@ class SettingsDialog(tk.Toplevel):
         if new_insert_pos in ("below_selected", "append", "sort_view"):
             self.app.app_data.sort_active_insert_position = new_insert_pos
         self.app.app_data.import_year_from_fragrantica = self.import_year_var.get()
+        # Vote source: only persist a recognised value to keep the field tidy.
+        new_source = self.vote_source_var.get()
+        if new_source in VOTE_SOURCES:
+            self.app.app_data.vote_source = new_source
         # Column visibility
         for col_id, var in self.column_vis_vars.items():
             self.app.app_data.column_visibility[col_id] = var.get()
@@ -4997,7 +5203,9 @@ class App(tk.Tk):
             self.filter_config.has_my_vote or
             self.filter_config.has_fragrantica or
             self.filter_config.year_min > 0 or
-            self.filter_config.year_max > 0
+            self.filter_config.year_max > 0 or
+            any(s in ("has_fr", "has_my")
+                for s in (self.filter_config.voted_status or {}).values())
         )
         if has_filter:
             self.filter_button.config(bg=COLORS["accent"], fg=COLORS["bg"], relief="solid")
@@ -5257,11 +5465,12 @@ class App(tk.Tk):
         # Score filters: Empty values (score=0) are treated specially:
         # - Include mode: no match (won't show perfumes without data)
         # - Exclude mode: match (will show perfumes without data)
-        
+        # All score lookups go through _score_for() so they honour the
+        # AppData.vote_source preference (Fragrantica / Personal / Fallback).
+
         # Rating (range with include/exclude)
         if config.rating_min > 0 or config.rating_max < 5.0 or config.rating_exclude:
-            fr = (p.fragrantica or {}).get("rating_votes", {})
-            score = calculate_rating_score(fr, RATING_5)
+            score = self._score_for(p, "rating")
             has_data = score > 0
             in_range = config.rating_min <= score <= config.rating_max
             if config.rating_exclude:
@@ -5273,8 +5482,7 @@ class App(tk.Tk):
         
         # Longevity (range with include/exclude)
         if config.longevity_min > 0 or config.longevity_max < 5.0 or config.longevity_exclude:
-            fr = (p.fragrantica or {}).get("longevity_votes", {})
-            score = calculate_longevity_score(fr, LONGEVITY_5)
+            score = self._score_for(p, "longevity")
             has_data = score > 0
             in_range = config.longevity_min <= score <= config.longevity_max
             if config.longevity_exclude:
@@ -5286,8 +5494,7 @@ class App(tk.Tk):
         
         # Sillage (range with include/exclude)
         if config.sillage_min > 0 or config.sillage_max < 4.0 or config.sillage_exclude:
-            fr = (p.fragrantica or {}).get("sillage_votes", {})
-            score = calculate_sillage_score(fr, SILLAGE_4)
+            score = self._score_for(p, "sillage")
             has_data = score > 0
             in_range = config.sillage_min <= score <= config.sillage_max
             if config.sillage_exclude:
@@ -5299,8 +5506,7 @@ class App(tk.Tk):
         
         # Value (range with include/exclude)
         if config.value_min > 0 or config.value_max < 5.0 or config.value_exclude:
-            fr = (p.fragrantica or {}).get("value_votes", {})
-            score = calculate_value_score(fr, VALUE_5)
+            score = self._score_for(p, "value")
             has_data = score > 0
             in_range = config.value_min <= score <= config.value_max
             if config.value_exclude:
@@ -5341,6 +5547,17 @@ class App(tk.Tk):
         if config.has_fragrantica:
             if not p.fragrantica or not any(p.fragrantica.values()):
                 return False
+
+        # Per-dimension vote-status gate: independent from the global
+        # vote_source preference, lets the user say "only show perfumes
+        # that have data on Sillage" or "only show ones I've personally
+        # voted on for Rating".
+        for dim, status in (config.voted_status or {}).items():
+            if status == "any" or status not in VOTED_STATUS_OPTIONS:
+                continue
+            side = "fr" if status == "has_fr" else "my"
+            if not self._has_voted(p, dim, side):
+                return False
         
         # Year range (active when either bound > 0; unset years are excluded)
         if config.year_min > 0 or config.year_max > 0:
@@ -5367,6 +5584,67 @@ class App(tk.Tk):
             return tuple(keys)
         
         return sorted(perfumes, key=sort_key)
+
+    # Mapping for source-aware numeric scoring. Keys match the dimension
+    # names used in SortConfig / FilterConfig score fields ("rating",
+    # "longevity", ...) -- *not* the underlying vote-block keys (those have
+    # the "_votes" suffix).
+    _NUMERIC_DIM_INFO = {
+        "rating":    (calculate_rating_score, RATING_5),
+        "longevity": (calculate_longevity_score, LONGEVITY_5),
+        "sillage":   (calculate_sillage_score, SILLAGE_4),
+        "value":     (calculate_value_score, VALUE_5),
+        "gender":    (calculate_gender_score, GENDER_5),
+    }
+
+    def _vote_dicts(self, p: Perfume, dim: str):
+        """Return (fragrantica_dict, my_dict) for the given numeric dim."""
+        fr_dict = (p.fragrantica or {}).get(f"{dim}_votes", {}) or {}
+        my_dict = (p.my_votes or {}).get(f"my_{dim}_votes", {}) or {}
+        return fr_dict, my_dict
+
+    def _score_for(self, p: Perfume, dim: str) -> float:
+        """Return the weighted score for a numeric dim, honouring vote_source.
+
+        Returns 0.0 when the selected source has no votes for this perfume on
+        this dim -- this preserves the historical "no data sorts to the end
+        on desc / start on asc" behaviour, and lets score-range filters fall
+        through their existing `score > 0` "has_data" gate without changes.
+
+        - "fragrantica" : Fragrantica votes only.
+        - "personal"    : Personal votes only; 0.0 when the user hasn't voted.
+        - "fallback"    : Personal where any personal vote exists, otherwise
+                          Fragrantica. Falls all the way to 0.0 only when
+                          neither side has data.
+        """
+        info = self._NUMERIC_DIM_INFO.get(dim)
+        if info is None:
+            return 0.0
+        fn, keys = info
+        fr_dict, my_dict = self._vote_dicts(p, dim)
+        source = getattr(self.app_data, "vote_source", "fragrantica")
+
+        if source == "personal":
+            return fn(my_dict, keys)
+        if source == "fallback":
+            my_total = sum(int(my_dict.get(k, 0) or 0) for k in keys)
+            if my_total > 0:
+                return fn(my_dict, keys)
+            return fn(fr_dict, keys)
+        # default: fragrantica
+        return fn(fr_dict, keys)
+
+    def _has_voted(self, p: Perfume, dim: str, side: str) -> bool:
+        """True iff the requested side has any votes on this numeric dim.
+        side is 'fr' or 'my'.
+        """
+        info = self._NUMERIC_DIM_INFO.get(dim)
+        if info is None:
+            return False
+        _, keys = info
+        fr_dict, my_dict = self._vote_dicts(p, dim)
+        src = fr_dict if side == "fr" else my_dict
+        return sum(int(src.get(k, 0) or 0) for k in keys) > 0
     
     def _get_sort_value(self, p: Perfume, dimension: str, order: str) -> Tuple:
         """Get sort value for a perfume on a given dimension"""
@@ -5408,23 +5686,19 @@ class App(tk.Tk):
             return (-y,) if order == "desc" else (y,)
         
         elif dimension == "rating":
-            fr = (p.fragrantica or {}).get("rating_votes", {})
-            score = calculate_rating_score(fr, RATING_5)
+            score = self._score_for(p, "rating")
             return (-score,) if order == "desc" else (score,)
         
         elif dimension == "longevity":
-            fr = (p.fragrantica or {}).get("longevity_votes", {})
-            score = calculate_longevity_score(fr, LONGEVITY_5)
+            score = self._score_for(p, "longevity")
             return (-score,) if order == "desc" else (score,)
         
         elif dimension == "sillage":
-            fr = (p.fragrantica or {}).get("sillage_votes", {})
-            score = calculate_sillage_score(fr, SILLAGE_4)
+            score = self._score_for(p, "sillage")
             return (-score,) if order == "desc" else (score,)
         
         elif dimension == "gender":
-            fr = (p.fragrantica or {}).get("gender_votes", {})
-            score = calculate_gender_score(fr, GENDER_5)
+            score = self._score_for(p, "gender")
             # Encoding is now male=5, female=1 (aligned with all other dimensions).
             if order == "female_first":
                 return (score,)   # Lower score (female=1) comes first
@@ -5434,8 +5708,7 @@ class App(tk.Tk):
                 return (abs(score - 3.0),)
         
         elif dimension == "value":
-            fr = (p.fragrantica or {}).get("value_votes", {})
-            score = calculate_value_score(fr, VALUE_5)
+            score = self._score_for(p, "value")
             return (-score,) if order == "desc" else (score,)
         
         elif dimension == "state":
@@ -5861,12 +6134,24 @@ class App(tk.Tk):
         then redistribute widths so the layout fills the available space
         cleanly (no gap, no overflow). tkinter does not auto-redistribute
         stretchable columns when ``displaycolumns`` changes.
+
+        Skips the redistribute pass when the visible-column set is unchanged
+        from the previous call -- otherwise every Settings save would
+        rebalance widths even when the user only toggled an unrelated
+        preference, and integer-rounding plus minor scrollbar/grab timing
+        differences cause visible (pixel-level) drift.
         """
         cv = self.app_data.column_visibility
         visible_cols = ["brand", "name"]
         for col_id, _ in self.OPTIONAL_COLUMNS:
             if cv.get(col_id, True):
                 visible_cols.append(col_id)
+
+        prev = list(self.tree["displaycolumns"]) if self.tree["displaycolumns"] != "#all" else None
+        if prev == visible_cols:
+            # No structural change -> leave widths alone.
+            return
+
         self.tree["displaycolumns"] = visible_cols
         self._redistribute_tree_columns(visible_cols)
     
