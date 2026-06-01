@@ -15,6 +15,7 @@ Files:
 from __future__ import annotations
 
 import json
+import math
 import os
 import time
 import uuid
@@ -1331,75 +1332,221 @@ class MiniSpectrum(ttk.Frame):
 class WhenToWearStrip(ttk.Frame):
     """Compact 6-slot strip for the When-to-Wear vote summary.
 
-    Each slot is fixed-width and shows:
-      - blank when neither side has voted for that option (no misleading gray)
-      - blue text when Fragrantica's majority includes it
-      - orange text when the user has voted for it
-      - green text when both agree
+    Each slot shows a small line-art icon for its option (spring sprout,
+    summer beach umbrella, fall leaf, winter snowflake, day sun, night
+    crescent moon). The icon's stroke colour encodes who voted for that
+    option:
+      - blue   when only Fragrantica's majority includes it
+      - orange when only the user has voted for it
+      - green  when both agree
+      - muted gray (the spectrum baseline colour) when neither side has
+        voted -- the icon is still drawn so the slot's identity is
+        always recognisable, just visually de-emphasised.
+
+    Pixel dimensions scale with the app's font size via scale_px(); the
+    BASE_* values below are calibrated for BASE_FONT_SIZE (10).
     """
 
-    SLOT_WIDTH = 4   # char width per slot (kept fixed for alignment)
+    BASE_SLOT_W = 18    # per-slot drawing width in px (at BASE_FONT_SIZE)
+    BASE_SLOT_H = 18    # canvas height -- matches MiniSpectrum.BASE_LINE_H
+    BASE_ICON_PAD = 2   # margin inside each slot before icon bounding box
+    BASE_LINE_W = 2     # icon stroke width
+
     KEYS = ["spring", "summer", "fall", "winter", "day", "night"]
-    LABELS = {
-        "spring": "SPR", "summer": "SUM", "fall": "FAL", "winter": "WIN",
-        "day": "DAY", "night": "NGT",
-    }
 
     def __init__(self, master, font_size: int = BASE_FONT_SIZE, **kwargs):
         super().__init__(master, style="Panel.TFrame", **kwargs)
-        # Slot width is in char units so it already breathes with the named
-        # fonts; font_size is held only so the parent can call update_font_size
-        # without special-casing this widget.
         self.font_size = font_size
         self.detail_text = ""
         self._click_callback = None
-        self.slot_labels = {}
-        for key in self.KEYS:
-            lbl = tk.Label(self, text="", bg=COLORS["panel"],
-                           fg=COLORS["text"], width=self.SLOT_WIDTH,
-                           anchor="center", cursor="hand2")
-            lbl.pack(side="left")
-            self.slot_labels[key] = lbl
+        self._fr_set = set()
+        self._my_set = set()
 
-        self._tip = ToolTip(self, delay=TOOLTIP_DELAY_DETAIL)
-        for w in self.slot_labels.values():
-            w.bind("<Enter>", self._on_enter)
-            w.bind("<Leave>", self._on_leave)
+        self._compute_dims()
+        self.canvas = tk.Canvas(self, width=self.canvas_w, height=self.slot_h,
+                                bg=COLORS["panel"], highlightthickness=0,
+                                cursor="hand2")
+        self.canvas.pack(side="left")
+
+        self._tip = ToolTip(self.canvas, delay=TOOLTIP_DELAY_DETAIL)
+        self.canvas.bind("<Enter>", self._on_enter)
+        self.canvas.bind("<Leave>", self._on_leave)
+
+        self._render()
+
+    def _compute_dims(self):
+        """Recompute scaled pixel dimensions from current font_size."""
+        self.slot_w = scale_px(self.BASE_SLOT_W, self.font_size)
+        self.slot_h = scale_px(self.BASE_SLOT_H, self.font_size)
+        self.icon_pad = scale_px(self.BASE_ICON_PAD, self.font_size)
+        self.icon_lw = max(1, scale_px(self.BASE_LINE_W, self.font_size))
+        self.canvas_w = self.slot_w * len(self.KEYS)
 
     def update_font_size(self, font_size: int):
-        """No-op for now; slot Labels use the named font and auto-rescale.
-
-        Kept as a stable interface so callers can treat MiniSpectrum and
-        WhenToWearStrip uniformly.
-        """
+        """React to a font-size change: resize the canvas and redraw."""
         self.font_size = font_size
+        self._compute_dims()
+        self.canvas.config(width=self.canvas_w, height=self.slot_h)
+        self._render()
 
     def bind_click(self, callback):
+        """Forward a canvas click to the given callback (no event arg)."""
         self._click_callback = callback
-        for w in self.slot_labels.values():
-            w.bind("<Button-1>", lambda e: callback())
+        self.canvas.bind("<Button-1>", lambda e: callback())
 
     def set_data(self, fr_top_keys, my_voted_keys, detail_text: str = ""):
-        """Update per-slot state.
+        """Update per-slot state and redraw.
 
         fr_top_keys / my_voted_keys are iterables of option keys.
         """
-        fr_set = set(fr_top_keys or [])
-        my_set = set(my_voted_keys or [])
-        for key in self.KEYS:
-            lbl = self.slot_labels[key]
-            in_fr = key in fr_set
-            in_my = key in my_set
-            if in_fr and in_my:
-                lbl.config(text=self.LABELS[key], fg=COLORS["agree"])
-            elif in_fr:
-                lbl.config(text=self.LABELS[key], fg=COLORS["accent"])
-            elif in_my:
-                lbl.config(text=self.LABELS[key], fg=COLORS["accent2"])
-            else:
-                # Truly empty: no text, fixed slot width keeps alignment.
-                lbl.config(text="", fg=COLORS["text"])
+        self._fr_set = set(fr_top_keys or [])
+        self._my_set = set(my_voted_keys or [])
         self.detail_text = detail_text
+        self._render()
+
+    def _slot_color(self, key: str) -> str:
+        in_fr = key in self._fr_set
+        in_my = key in self._my_set
+        if in_fr and in_my:
+            return COLORS["agree"]
+        if in_fr:
+            return COLORS["accent"]
+        if in_my:
+            return COLORS["accent2"]
+        # Neither side voted: muted, but always visible -- using the spectrum
+        # baseline colour keeps WhenToWear visually consistent with the
+        # MiniSpectrum's idle line.
+        return COLORS["line"]
+
+    def _render(self):
+        c = self.canvas
+        c.delete("all")
+        cy = self.slot_h / 2
+        # Inner bbox half-extents for icon drawing
+        hw = (self.slot_w - 2 * self.icon_pad) / 2
+        hh = (self.slot_h - 2 * self.icon_pad) / 2
+        for i, key in enumerate(self.KEYS):
+            cx = i * self.slot_w + self.slot_w / 2
+            color = self._slot_color(key)
+            painter = self._PAINTERS.get(key)
+            if painter is not None:
+                painter(self, c, cx, cy, hw, hh, color, self.icon_lw)
+
+    # ---- Per-icon painters (Canvas line-art) ----
+    # Each painter draws a single icon centred at (cx, cy) within a
+    # bounding box of half-extents (hw, hh). `color` is the stroke colour;
+    # icons are mostly outline-only so the muted-empty state still reads
+    # clearly. Moon is the one filled exception (see _paint_night).
+
+    def _paint_spring(self, c, cx, cy, hw, hh, color, lw):
+        """Sprout: short vertical stem with one curved leaf."""
+        # Stem
+        c.create_line(cx, cy + hh * 0.7, cx, cy - hh * 0.15,
+                      fill=color, width=lw, capstyle="round")
+        # Leaf: closed smooth curve attached at stem top, pointing up-left
+        pts = [
+            cx,                 cy - hh * 0.15,   # base on stem
+            cx - hw * 0.55,     cy - hh * 0.15,   # lower outer
+            cx - hw * 0.75,     cy - hh * 0.6,    # tip
+            cx - hw * 0.20,     cy - hh * 0.55,   # upper inner
+            cx,                 cy - hh * 0.15,   # close to base
+        ]
+        c.create_line(*pts, fill=color, width=lw,
+                      smooth=True, capstyle="round")
+
+    def _paint_summer(self, c, cx, cy, hw, hh, color, lw):
+        """Beach umbrella: top semicircular canopy + diameter line + pole."""
+        canopy_h = hh * 1.0
+        canopy_top = cy - hh * 0.55
+        canopy_bot = canopy_top + canopy_h    # diameter line y
+        canopy_w = hw * 1.7
+        c.create_arc(cx - canopy_w / 2, canopy_top,
+                     cx + canopy_w / 2, canopy_top + canopy_h,
+                     start=0, extent=180, style=tk.ARC,
+                     outline=color, width=lw)
+        # Diameter line under canopy
+        c.create_line(cx - canopy_w / 2, canopy_bot,
+                      cx + canopy_w / 2, canopy_bot,
+                      fill=color, width=lw, capstyle="round")
+        # Pole
+        c.create_line(cx, canopy_bot, cx, cy + hh * 0.9,
+                      fill=color, width=lw, capstyle="round")
+
+    def _paint_fall(self, c, cx, cy, hw, hh, color, lw):
+        """Stylised leaf with a centre vein."""
+        top_x, top_y = cx, cy - hh * 0.7
+        bot_x, bot_y = cx, cy + hh * 0.55
+        # Closed smooth outline (oval-ish leaf)
+        pts = [
+            top_x, top_y,
+            cx + hw * 0.65, cy - hh * 0.05,   # right shoulder
+            cx + hw * 0.25, cy + hh * 0.45,   # right base
+            bot_x, bot_y,
+            cx - hw * 0.25, cy + hh * 0.45,   # left base
+            cx - hw * 0.65, cy - hh * 0.05,   # left shoulder
+            top_x, top_y,                     # close
+        ]
+        c.create_line(*pts, fill=color, width=lw,
+                      smooth=True, capstyle="round")
+        # Centre vein
+        c.create_line(top_x, top_y, bot_x, bot_y,
+                      fill=color, width=lw, capstyle="round")
+
+    def _paint_winter(self, c, cx, cy, hw, hh, color, lw):
+        """Snowflake: three lines crossing at the centre (6-arm star)."""
+        r = min(hw, hh) * 0.85
+        for angle_deg in (0, 60, 120):
+            rad = math.radians(angle_deg)
+            dx = r * math.cos(rad)
+            dy = r * math.sin(rad)
+            c.create_line(cx - dx, cy - dy, cx + dx, cy + dy,
+                          fill=color, width=lw, capstyle="round")
+
+    def _paint_day(self, c, cx, cy, hw, hh, color, lw):
+        """Sun: outlined centre disc with 8 short radial rays."""
+        r = min(hw, hh) * 0.32
+        # Centre disc (outline)
+        c.create_oval(cx - r, cy - r, cx + r, cy + r,
+                      outline=color, width=lw, fill="")
+        # 8 rays
+        ray_inner = r * 1.45
+        ray_outer = min(hw, hh) * 0.95
+        for i in range(8):
+            ang = math.radians(i * 45)
+            ix = cx + ray_inner * math.cos(ang)
+            iy = cy + ray_inner * math.sin(ang)
+            ox = cx + ray_outer * math.cos(ang)
+            oy = cy + ray_outer * math.sin(ang)
+            c.create_line(ix, iy, ox, oy,
+                          fill=color, width=lw, capstyle="round")
+
+    def _paint_night(self, c, cx, cy, hw, hh, color, lw):
+        """Crescent moon.
+
+        Drawn as two filled discs: a coloured disc with a panel-coloured
+        cover offset to the right that 'eats' a chunk, leaving a crescent
+        whose bulge points left. Moon is the one filled icon in the set --
+        a celestial body reads better as a shape than as an outline at
+        these sizes, and the panel-coloured cover keeps the silhouette
+        crisp on the dark background.
+        """
+        r1 = min(hw, hh) * 0.78
+        r2 = min(hw, hh) * 0.65
+        offset = hw * 0.45
+        c.create_oval(cx - r1, cy - r1, cx + r1, cy + r1,
+                      fill=color, outline="")
+        c.create_oval(cx + offset - r2, cy - r2,
+                      cx + offset + r2, cy + r2,
+                      fill=COLORS["panel"], outline="")
+
+    _PAINTERS = {
+        "spring": _paint_spring,
+        "summer": _paint_summer,
+        "fall":   _paint_fall,
+        "winter": _paint_winter,
+        "day":    _paint_day,
+        "night":  _paint_night,
+    }
 
     def _on_enter(self, _event):
         if self.detail_text:

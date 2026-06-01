@@ -597,8 +597,11 @@ body {
                          value / gender), two dots on a line with optional
                          endpoint labels and a hover tooltip with exact scores
      - .when-strip     : When-to-Wear categorical block, 6 fixed-width slots
-                         coloured by who picked each (Fragrantica / personal /
-                         both / neither)
+                         each holding a small SVG icon (sprout / umbrella /
+                         leaf / snowflake / sun / crescent moon) coloured
+                         by who picked each (Fragrantica / personal / both /
+                         neither -- the empty state stays drawn but in the
+                         muted line colour, mirroring desktop)
    All dimensions are em-based so they scale naturally with the rendered
    font size; no JS-side scaling is required as on the desktop side.        */
 
@@ -661,27 +664,36 @@ body {
 .when-strip {
     display: inline-flex;
     align-items: center;
-    gap: 0.35em;
-    font-family: monospace;
-    font-size: 0.8rem;
-    font-weight: 600;
-    letter-spacing: 0.5px;
+    gap: 0.15em;
     cursor: help;
+    line-height: 0;
 }
 
 .when-strip .when-slot {
-    display: inline-block;
-    min-width: 2.4em;
-    text-align: center;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.4em;
+    height: 1.4em;
+}
+
+/* SVG icon: scales with the slot's font size via em sizing. stroke colour
+   inherits from the slot's `color` (currentColor in the SVG markup) so
+   we only have to declare per-state colour once on .when-slot.*/
+.when-strip .when-icon {
+    width: 100%;
+    height: 100%;
+    display: block;
 }
 
 .when-strip .when-slot.fr    { color: var(--vote-fr); }
 .when-strip .when-slot.my    { color: var(--vote-my); }
 .when-strip .when-slot.agree { color: var(--vote-agree); }
-/* Empty slot keeps the width so the strip stays aligned across perfumes,
-   but its label is invisible to avoid implying a non-vote is a negative.   */
+/* Empty slot still draws the icon so the slot's identity is recognisable,
+   but in the muted line colour so it visually de-emphasises against the
+   active states. Mirrors desktop WhenToWearStrip's "muted gray" empty. */
 .when-strip .when-slot.empty {
-    color: transparent;
+    color: var(--vote-line);
 }
 
 .block-sample {

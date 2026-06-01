@@ -328,12 +328,13 @@ function renderMiniSpectrum(frScore, myScore, scoreMin, scoreMax, leftLabel, rig
 //   agree (both)   = green
 //   fr  (Fragrantica top only) = blue
 //   my  (personal voted only)  = orange
-//   empty (neither) = blank but reserves width for alignment
+//   empty (neither) = muted line colour, icon still drawn so the slot's
+//                     identity stays recognisable (matches desktop).
+// Icons are inline SVGs rendered as line art (moon is the one filled
+// exception). Stroke colour drives the per-slot state visually; the
+// `currentColor` SVG attribute lets CSS swap colour cleanly via a class
+// modifier on the slot wrapper.
 function renderWhenToWearStrip(frTopKeys, myVotedKeys, frVotes, myVotes, keys) {
-    const labels = {
-        spring: 'SPR', summer: 'SUM', fall: 'FAL', winter: 'WIN',
-        day: 'DAY', night: 'NGT'
-    };
     const order = ['spring', 'summer', 'fall', 'winter', 'day', 'night'];
     const frSet = new Set(frTopKeys || []);
     const mySet = new Set(myVotedKeys || []);
@@ -345,7 +346,7 @@ function renderWhenToWearStrip(frTopKeys, myVotedKeys, frVotes, myVotes, keys) {
         if (inFr && inMy) cls = 'agree';
         else if (inFr) cls = 'fr';
         else if (inMy) cls = 'my';
-        return `<span class="when-slot ${cls}">${labels[k] || k.toUpperCase()}</span>`;
+        return `<span class="when-slot ${cls}" aria-label="${k}">${WHEN_ICONS[k] || ''}</span>`;
     }).join('');
 
     const frN = frVotes ? keys.reduce((s, k) => s + (parseInt(frVotes[k]) || 0), 0) : 0;
@@ -356,6 +357,73 @@ function renderWhenToWearStrip(frTopKeys, myVotedKeys, frVotes, myVotes, keys) {
 
     return `<span class="when-strip" title="${escapeAttr(tip)}">${slots}</span>`;
 }
+
+// Per-slot SVG icons. Drawn in a 16x16 viewBox, stroke="currentColor",
+// fill="none" (except moon, which is filled). The .when-slot CSS class
+// drives `color` per state -- so all icons inherit colour via
+// currentColor and we don't need to duplicate stroke= for every state.
+const WHEN_ICONS = {
+    // Sprout: short stem + curved leaf pointing up-left
+    spring: `<svg class="when-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M 8 14 L 8 7" stroke="currentColor" stroke-width="1.6"
+              stroke-linecap="round" fill="none"/>
+        <path d="M 8 7 C 5.5 7 3.5 5.5 3 3 C 5 4 7 5.5 8 7 Z"
+              stroke="currentColor" stroke-width="1.4"
+              stroke-linejoin="round" fill="none"/>
+    </svg>`,
+    // Beach umbrella: top semicircle canopy + diameter line + pole
+    summer: `<svg class="when-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M 2 8 A 6 6 0 0 1 14 8" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round" fill="none"/>
+        <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round"/>
+        <line x1="8" y1="8" x2="8" y2="15" stroke="currentColor"
+              stroke-width="1.5" stroke-linecap="round"/>
+    </svg>`,
+    // Stylised leaf with centre vein
+    fall: `<svg class="when-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M 8 2 C 12 4 12 11 8 14 C 4 11 4 4 8 2 Z"
+              stroke="currentColor" stroke-width="1.5"
+              stroke-linejoin="round" fill="none"/>
+        <line x1="8" y1="2" x2="8" y2="14" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+    </svg>`,
+    // Snowflake: 3 lines crossing at centre (6-arm star)
+    winter: `<svg class="when-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="5" y1="2.8" x2="11" y2="13.2" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="11" y1="2.8" x2="5" y2="13.2" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+    </svg>`,
+    // Sun: outlined centre disc with 8 short radial rays
+    day: `<svg class="when-icon" viewBox="0 0 16 16" aria-hidden="true">
+        <circle cx="8" cy="8" r="2.6" stroke="currentColor"
+                stroke-width="1.4" fill="none"/>
+        <line x1="8" y1="1.5" x2="8" y2="3.5" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="8" y1="12.5" x2="8" y2="14.5" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="1.5" y1="8" x2="3.5" y2="8" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="12.5" y1="8" x2="14.5" y2="8" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="3.4" y1="3.4" x2="4.8" y2="4.8" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="11.2" y1="11.2" x2="12.6" y2="12.6" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="12.6" y1="3.4" x2="11.2" y2="4.8" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+        <line x1="4.8" y1="11.2" x2="3.4" y2="12.6" stroke="currentColor"
+              stroke-width="1.4" stroke-linecap="round"/>
+    </svg>`,
+    // Crescent moon: filled crescent (single path) -- the one filled icon
+    night: `<svg class="when-icon when-icon-filled" viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M 11 2.5 A 6 6 0 1 0 11 13.5 A 4.5 4.5 0 1 1 11 2.5 Z"
+              fill="currentColor" stroke="none"/>
+    </svg>`
+};
 
 function getPerfumeScore(p, voteKey) {
     const block = VOTE_BLOCKS.find(b => b.key === voteKey);

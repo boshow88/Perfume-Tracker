@@ -265,11 +265,11 @@ Date and Location persist when switching perfumes for batch logging.
   - Blue circle (larger) = Fragrantica weighted score
   - Orange circle (smaller, drawn on top) = Personal score
   - Endpoint labels: `1` / `5` for ratings, `♀` / `♂` for gender (male on the right, matching "high score = right" across all dimensions)
-- "When to Wear" shows a 6-slot strip (`SPR SUM FAL WIN DAY NGT`):
-  - Blue text = in Fragrantica's top picks
-  - Orange text = personally voted
-  - Green text = both agree
-  - Blank slot = neither side picked it
+- "When to Wear" shows a 6-slot icon strip (sprout / beach umbrella / leaf / snowflake / sun / crescent moon):
+  - Blue icon = in Fragrantica's top picks
+  - Orange icon = personally voted
+  - Green icon = both agree
+  - Muted gray icon = neither side picked it (icon still drawn so the slot's identity stays recognisable)
 - Hovering any of these reveals exact numbers (Fragrantica to 2 decimals, personal as integers).
 
 **Expanded-state bars** (click the title or `＋` to expand):
