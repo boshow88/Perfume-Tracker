@@ -1442,8 +1442,14 @@ class WhenToWearStrip(ttk.Frame):
 
     BASE_SLOT_W = 18    # per-slot drawing width in px (at BASE_FONT_SIZE)
     BASE_SLOT_H = 18    # canvas height -- matches MiniSpectrum.BASE_LINE_H
-    BASE_ICON_PAD = 2   # margin inside each slot before icon bounding box
-    BASE_LINE_W = 2     # icon stroke width
+    BASE_ICON_PAD = 1   # margin inside each slot before icon bounding box
+    # Web parity: SVG slot is 1.4em x 1.4em with viewBox 16 and stroke=1.4.
+    # That gives a stroke ratio of (1.4 / 16) x slot, which at fs=10 is
+    # 1.4 * 14/16 = 1.225 CSS px.  Desktop slot is 18 px (slightly larger
+    # than web's 14 at the same font), so the matching stroke is
+    # 1.4 * 18/16 = 1.575 px.  Kept as float and NOT rounded by scale_px;
+    # Tk Canvas accepts float widths.
+    BASE_LINE_W = 1.575
 
     KEYS = ["spring", "summer", "fall", "winter", "day", "night"]
 
@@ -1472,7 +1478,10 @@ class WhenToWearStrip(ttk.Frame):
         self.slot_w = scale_px(self.BASE_SLOT_W, self.font_size)
         self.slot_h = scale_px(self.BASE_SLOT_H, self.font_size)
         self.icon_pad = scale_px(self.BASE_ICON_PAD, self.font_size)
-        self.icon_lw = max(1, scale_px(self.BASE_LINE_W, self.font_size))
+        # Stroke width: keep as float (no scale_px / int rounding) so the
+        # web's stroke ratio is preserved; Tk Canvas accepts float widths.
+        self.icon_lw = max(1.0,
+            self.BASE_LINE_W * self.font_size / BASE_FONT_SIZE * _DPI_FACTOR)
         self.canvas_w = self.slot_w * len(self.KEYS)
 
     def update_font_size(self, font_size: int):
@@ -1530,80 +1539,145 @@ class WhenToWearStrip(ttk.Frame):
     # bounding box of half-extents (hw, hh). `color` is the stroke colour;
     # icons are mostly outline-only so the muted-empty state still reads
     # clearly. Moon is the one filled exception (see _paint_night).
+    #
+    # Geometry is mirrored in web/app.js WHEN_ICONS (SVG).  The two are
+    # hand-aligned, NOT generated from a shared spec - keep them in sync
+    # whenever you tweak any icon's parameters or shape.
 
     def _paint_spring(self, c, cx, cy, hw, hh, color, lw):
-        """Sprout: short vertical stem with one curved leaf."""
-        # Stem
-        c.create_line(cx, cy + hh * 0.7, cx, cy - hh * 0.15,
+        """Sprout: short vertical stem with one curved leaf pointing up-left.
+
+        Geometry sampled from web SVG:
+            stem:  M 8 14 L 8 7
+            leaf:  M 8 7 C 5.5 7 3.5 5.5 3 3 C 5 4 7 5.5 8 7 Z
+        Each cubic Bezier is sampled at t = 0.25, 0.5, 0.75 (3 interior
+        anchors per side); Tk smooth=True interpolates Catmull-Rom through
+        those + the base/tip endpoints, closely tracking the web outline.
+        """
+        c.create_line(cx, cy + hh * 0.75, cx, cy - hh * 0.125,
                       fill=color, width=lw, capstyle="round")
-        # Leaf: closed smooth curve attached at stem top, pointing up-left
+        # Leaf outline (closed): base -> Bezier1 -> tip -> Bezier2 -> base
+        base_x, base_y = cx, cy - hh * 0.125
+        tip_x, tip_y = cx - hw * 0.625, cy - hh * 0.625
         pts = [
-            cx,                 cy - hh * 0.15,   # base on stem
-            cx - hw * 0.55,     cy - hh * 0.15,   # lower outer
-            cx - hw * 0.75,     cy - hh * 0.6,    # tip
-            cx - hw * 0.20,     cy - hh * 0.55,   # upper inner
-            cx,                 cy - hh * 0.15,   # close to base
+            base_x, base_y,
+            cx - hw * 0.221, cy - hh * 0.159,    # B1 t=0.25
+            cx - hw * 0.406, cy - hh * 0.258,    # B1 t=0.5
+            cx - hw * 0.545, cy - hh * 0.415,    # B1 t=0.75
+            tip_x, tip_y,
+            cx - hw * 0.439, cy - hh * 0.520,    # B2 t=0.25
+            cx - hw * 0.266, cy - hh * 0.398,    # B2 t=0.5
+            cx - hw * 0.115, cy - hh * 0.265,    # B2 t=0.75
+            base_x, base_y,                       # close
         ]
         c.create_line(*pts, fill=color, width=lw,
                       smooth=True, capstyle="round")
 
     def _paint_summer(self, c, cx, cy, hw, hh, color, lw):
-        """Beach umbrella: top semicircular canopy + diameter line + pole."""
-        canopy_h = hh * 1.0
-        canopy_top = cy - hh * 0.55
-        canopy_bot = canopy_top + canopy_h    # diameter line y
-        canopy_w = hw * 1.7
+        """Beach umbrella: top semicircular canopy + diameter line + pole.
+
+        Geometry mirrors the web SVG exactly (in viewBox 16, half=8):
+            canopy: arc from (2,8) to (14,8), apex at (8,2)
+            pole:   from (8,8) to (8,15)
+        Normalised to (hw, hh):
+            canopy_w   = 1.5 * hw   (half-width = 0.75 * hw)
+            canopy_h   = 0.75 * hh  (apex 0.75*hh above the diameter line)
+            canopy_top = cy - 0.75*hh,  diameter_y = cy
+            pole bottom at cy + 0.875*hh
+
+        Tk's create_arc with start=0, extent=180 has its endpoints at the
+        horizontal middle of the bbox.  The bbox vertical span is therefore
+        2*canopy_h = 1.5*hh, so the endpoints land exactly on the diameter
+        line at y = cy (no gap between arc and diameter).
+        """
+        canopy_w = hw * 1.5
+        canopy_h = hh * 0.75
+        canopy_top = cy - canopy_h
+        diameter_y = cy
         c.create_arc(cx - canopy_w / 2, canopy_top,
-                     cx + canopy_w / 2, canopy_top + canopy_h,
+                     cx + canopy_w / 2, canopy_top + 2 * canopy_h,
                      start=0, extent=180, style=tk.ARC,
                      outline=color, width=lw)
-        # Diameter line under canopy
-        c.create_line(cx - canopy_w / 2, canopy_bot,
-                      cx + canopy_w / 2, canopy_bot,
+        c.create_line(cx - canopy_w / 2, diameter_y,
+                      cx + canopy_w / 2, diameter_y,
                       fill=color, width=lw, capstyle="round")
-        # Pole
-        c.create_line(cx, canopy_bot, cx, cy + hh * 0.9,
+        c.create_line(cx, diameter_y, cx, cy + hh * 0.875,
                       fill=color, width=lw, capstyle="round")
 
     def _paint_fall(self, c, cx, cy, hw, hh, color, lw):
-        """Stylised leaf with a centre vein."""
-        top_x, top_y = cx, cy - hh * 0.7
-        bot_x, bot_y = cx, cy + hh * 0.55
-        # Closed smooth outline (oval-ish leaf)
+        """Stylised falling leaf with a centre vein.
+
+        Anchor points sampled from web SVG's cubic Bezier
+            M 8 2 C 12 4 12 11 8 14 C 4 11 4 4 8 2 Z
+        at t = 0, 0.25, 0.5, 0.75, 1, then the whole leaf is rotated
+        -10 degrees so it reads as 'falling in mid-air' rather than a
+        stationary oval.  The tilt is mild (vs the -22 degree experiment
+        earlier) so the silhouette stays readable inside the small slot.
+        """
+        cos_t, sin_t = 0.9848, -0.1736   # cos(-10 deg), sin(-10 deg)
+
+        def rot(dx, dy):
+            return (cx + dx * cos_t - dy * sin_t,
+                    cy + dx * sin_t + dy * cos_t)
+
+        top = rot(0, -hh * 0.75)
+        bot = rot(0, hh * 0.75)
         pts = [
-            top_x, top_y,
-            cx + hw * 0.65, cy - hh * 0.05,   # right shoulder
-            cx + hw * 0.25, cy + hh * 0.45,   # right base
-            bot_x, bot_y,
-            cx - hw * 0.25, cy + hh * 0.45,   # left base
-            cx - hw * 0.65, cy - hh * 0.05,   # left shoulder
-            top_x, top_y,                     # close
+            top[0], top[1],
+            *rot(hw * 0.281, -hh * 0.463),    # B1 t=0.25
+            *rot(hw * 0.375, -hh * 0.047),    # B1 t=0.5 (right belly)
+            *rot(hw * 0.281, hh * 0.393),     # B1 t=0.75
+            bot[0], bot[1],
+            *rot(-hw * 0.281, hh * 0.393),    # B2 t=0.25
+            *rot(-hw * 0.375, -hh * 0.047),   # B2 t=0.5 (left belly)
+            *rot(-hw * 0.281, -hh * 0.463),   # B2 t=0.75
+            top[0], top[1],                    # close
         ]
         c.create_line(*pts, fill=color, width=lw,
                       smooth=True, capstyle="round")
         # Centre vein
-        c.create_line(top_x, top_y, bot_x, bot_y,
+        c.create_line(top[0], top[1], bot[0], bot[1],
                       fill=color, width=lw, capstyle="round")
 
     def _paint_winter(self, c, cx, cy, hw, hh, color, lw):
-        """Snowflake: three lines crossing at the centre (6-arm star)."""
-        r = min(hw, hh) * 0.85
-        for angle_deg in (0, 60, 120):
-            rad = math.radians(angle_deg)
-            dx = r * math.cos(rad)
-            dy = r * math.sin(rad)
-            c.create_line(cx - dx, cy - dy, cx + dx, cy + dy,
+        """Snowflake: 6 arms with chevron branches near each tip.
+
+        Aligned to web (arm radius = 0.75 of half-iconbox to match SVG
+        viewBox 16 / arm length 6).  Chevron design preserved: each arm
+        has a small Y-shaped branch at ~55% along, two short segments at
+        +/-40 degrees from the arm axis pointing outward.
+        """
+        r = min(hw, hh) * 0.75
+        branch_root = 0.55
+        branch_len = r * 0.32
+        branch_ang = math.radians(40)
+        for i in range(6):
+            ang = math.radians(i * 60)
+            ax, ay = math.cos(ang), math.sin(ang)
+            c.create_line(cx, cy, cx + r * ax, cy + r * ay,
                           fill=color, width=lw, capstyle="round")
+            bx = cx + r * branch_root * ax
+            by = cy + r * branch_root * ay
+            for sign in (-1, 1):
+                bang = ang + sign * branch_ang
+                ex = bx + branch_len * math.cos(bang)
+                ey = by + branch_len * math.sin(bang)
+                c.create_line(bx, by, ex, ey,
+                              fill=color, width=lw, capstyle="round")
 
     def _paint_day(self, c, cx, cy, hw, hh, color, lw):
-        """Sun: outlined centre disc with 8 short radial rays."""
-        r = min(hw, hh) * 0.32
+        """Sun: outlined centre disc with 8 short radial rays.
+
+        Proportions match web SVG: disc r ~= 0.36, rays from 0.56 to 0.82.
+        """
+        m = min(hw, hh)
+        r = m * 0.36
         # Centre disc (outline)
         c.create_oval(cx - r, cy - r, cx + r, cy + r,
                       outline=color, width=lw, fill="")
         # 8 rays
-        ray_inner = r * 1.45
-        ray_outer = min(hw, hh) * 0.95
+        ray_inner = m * 0.56
+        ray_outer = m * 0.82
         for i in range(8):
             ang = math.radians(i * 45)
             ix = cx + ray_inner * math.cos(ang)
@@ -1614,22 +1688,29 @@ class WhenToWearStrip(ttk.Frame):
                           fill=color, width=lw, capstyle="round")
 
     def _paint_night(self, c, cx, cy, hw, hh, color, lw):
-        """Crescent moon.
+        """Crescent moon - aligned to web SVG.
 
-        Drawn as two filled discs: a coloured disc with a panel-coloured
-        cover offset to the right that 'eats' a chunk, leaving a crescent
-        whose bulge points left. Moon is the one filled icon in the set --
-        a celestial body reads better as a shape than as an outline at
-        these sizes, and the panel-coloured cover keeps the silhouette
-        crisp on the dark background.
+        Web path: M 11 2.5 A 6 6 0 1 0 11 13.5 A 4.5 4.5 0 1 1 11 2.5 Z
+        Translated to two-disc subtraction:
+            outer disc: center (cx + 0.075*hw, cy), r = 0.75       (web: center 8.6, r=6)
+            cutter   :  center (cx + 0.375*hw, cy), r = 0.5625     (web: center 11, nominal r=4.5)
+        Note: the web path has rx=4.5 < half-chord (5.5), so SVG silently
+        scales it up to 5.5.  We mirror the developer's NOMINAL intent
+        (4.5/16 = 0.5625) which produces a crescent of similar shape.
+        Moon is the one filled icon: a celestial body reads better as a
+        shape than as an outline at these sizes; the panel-coloured cutter
+        keeps the silhouette crisp on the dark background.
         """
-        r1 = min(hw, hh) * 0.78
-        r2 = min(hw, hh) * 0.65
-        offset = hw * 0.45
-        c.create_oval(cx - r1, cy - r1, cx + r1, cy + r1,
+        m = min(hw, hh)
+        r1 = m * 0.75
+        r2 = m * 0.5625
+        outer_off = hw * 0.075
+        cutter_off = hw * 0.375
+        c.create_oval(cx + outer_off - r1, cy - r1,
+                      cx + outer_off + r1, cy + r1,
                       fill=color, outline="")
-        c.create_oval(cx + offset - r2, cy - r2,
-                      cx + offset + r2, cy + r2,
+        c.create_oval(cx + cutter_off - r2, cy - r2,
+                      cx + cutter_off + r2, cy + r2,
                       fill=COLORS["panel"], outline="")
 
     _PAINTERS = {
@@ -1688,27 +1769,32 @@ class CollapsibleVoteBlock(ttk.Frame):
         self.symbol_label.pack(side="left")
         self.symbol_label.bind("<Button-1>", self._on_title_click)
         
-        # Title row layout:
-        #   [+/-]  [Title:]  [spectrum or strip widget]  [sample size]
-        # The spectrum/strip is the at-a-glance visual; the textual numbers
-        # for either side are deferred to a hover tooltip on the widget so
-        # the row stays terse and uniformly aligned across all blocks.
+        # Title row layout (matches web's flex space-between):
+        #   [+/-]  [Title:]  ........  [spectrum or strip widget] [sample]
+        # The spectrum/strip + sample are right-aligned via side="right".
+        # Packing order is reversed because side="right" packs right-to-left:
+        # sample first (innermost-right), then spectrum (to its left).
+        # The textual numbers for either side are deferred to a hover tooltip
+        # on the widget so the row stays terse and uniformly aligned across
+        # all blocks.
         label_kwargs = dict(bg=COLORS["panel"], cursor="hand2")
         self.title_label = tk.Label(self.title_frame, text=f"{title}: ",
                                     anchor="w", fg=COLORS["text"], **label_kwargs)
         self.title_label.pack(side="left")
         self.title_label.bind("<Button-1>", self._on_title_click)
 
-        # Per-block summary widget. When-to-Wear is categorical (6 slots),
-        # everything else is a 1D spectrum with optional endpoint labels.
-        self.summary_widget = self._build_summary_widget()
-        self.summary_widget.pack(side="left", padx=(2, 6))
-        self.summary_widget.bind_click(self._on_title_click_no_arg)
-
+        # Sample size: rightmost
         self.sample_label = tk.Label(self.title_frame, text="(No data)",
                                      fg=COLORS["text"], **label_kwargs)
-        self.sample_label.pack(side="left")
+        self.sample_label.pack(side="right")
         self.sample_label.bind("<Button-1>", self._on_title_click)
+
+        # Per-block summary widget. When-to-Wear is categorical (6 slots),
+        # everything else is a 1D spectrum with optional endpoint labels.
+        # Packed with side="right" so it sits just left of the sample label.
+        self.summary_widget = self._build_summary_widget()
+        self.summary_widget.pack(side="right", padx=(6, 2))
+        self.summary_widget.bind_click(self._on_title_click_no_arg)
 
         # Content frame (shown when expanded)
         self.content_frame = ttk.Frame(self, style="Panel.TFrame")

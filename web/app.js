@@ -362,6 +362,10 @@ function renderWhenToWearStrip(frTopKeys, myVotedKeys, frVotes, myVotes, keys) {
 // fill="none" (except moon, which is filled). The .when-slot CSS class
 // drives `color` per state -- so all icons inherit colour via
 // currentColor and we don't need to duplicate stroke= for every state.
+// SVG icons for the When-to-Wear strip.  Geometry is mirrored in
+// perfume_tracker.py WhenToWearStrip._PAINTERS (Tk Canvas).  The two are
+// hand-aligned, NOT generated from a shared spec - keep them in sync
+// whenever you tweak any icon's parameters or shape.
 const WHEN_ICONS = {
     // Sprout: short stem + curved leaf pointing up-left
     spring: `<svg class="when-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -380,42 +384,56 @@ const WHEN_ICONS = {
         <line x1="8" y1="8" x2="8" y2="15" stroke="currentColor"
               stroke-width="1.5" stroke-linecap="round"/>
     </svg>`,
-    // Stylised leaf with centre vein
+    // Stylised leaf with centre vein, tilted -10 deg so it reads as
+    // 'falling in mid-air' rather than a stationary oval
     fall: `<svg class="when-icon" viewBox="0 0 16 16" aria-hidden="true">
-        <path d="M 8 2 C 12 4 12 11 8 14 C 4 11 4 4 8 2 Z"
-              stroke="currentColor" stroke-width="1.5"
-              stroke-linejoin="round" fill="none"/>
-        <line x1="8" y1="2" x2="8" y2="14" stroke="currentColor"
-              stroke-width="1.4" stroke-linecap="round"/>
+        <g transform="rotate(-10 8 8)" fill="none" stroke="currentColor"
+           stroke-linecap="round" stroke-linejoin="round">
+            <path d="M 8 2 C 12 4 12 11 8 14 C 4 11 4 4 8 2 Z"
+                  stroke-width="1.5"/>
+            <line x1="8" y1="2" x2="8" y2="14" stroke-width="1.4"/>
+        </g>
     </svg>`,
-    // Snowflake: 3 lines crossing at centre (6-arm star)
+    // Snowflake: 6 arms with chevron branches near each tip
     winter: `<svg class="when-icon" viewBox="0 0 16 16" aria-hidden="true">
-        <line x1="2" y1="8" x2="14" y2="8" stroke="currentColor"
-              stroke-width="1.4" stroke-linecap="round"/>
-        <line x1="5" y1="2.8" x2="11" y2="13.2" stroke="currentColor"
-              stroke-width="1.4" stroke-linecap="round"/>
-        <line x1="11" y1="2.8" x2="5" y2="13.2" stroke="currentColor"
-              stroke-width="1.4" stroke-linecap="round"/>
+        <g stroke="currentColor" stroke-width="1.4" stroke-linecap="round" fill="none">
+            <line x1="2" y1="8" x2="14" y2="8"/>
+            <line x1="5" y1="2.8" x2="11" y2="13.2"/>
+            <line x1="11" y1="2.8" x2="5" y2="13.2"/>
+            <line x1="11.3" y1="8"    x2="12.8" y2="9.2"/>
+            <line x1="11.3" y1="8"    x2="12.8" y2="6.8"/>
+            <line x1="9.65" y1="10.86" x2="9.32" y2="12.75"/>
+            <line x1="9.65" y1="10.86" x2="11.45" y2="11.52"/>
+            <line x1="6.35" y1="10.86" x2="4.55" y2="11.52"/>
+            <line x1="6.35" y1="10.86" x2="6.68" y2="12.75"/>
+            <line x1="4.7"  y1="8"    x2="3.2"  y2="6.8"/>
+            <line x1="4.7"  y1="8"    x2="3.2"  y2="9.2"/>
+            <line x1="6.35" y1="5.14" x2="6.68" y2="3.25"/>
+            <line x1="6.35" y1="5.14" x2="4.55" y2="4.48"/>
+            <line x1="9.65" y1="5.14" x2="11.45" y2="4.48"/>
+            <line x1="9.65" y1="5.14" x2="9.32" y2="3.25"/>
+        </g>
     </svg>`,
     // Sun: outlined centre disc with 8 short radial rays
+    // Proportions: r=0.36, ray_inner=0.56, ray_outer=0.82 of half-viewBox
     day: `<svg class="when-icon" viewBox="0 0 16 16" aria-hidden="true">
-        <circle cx="8" cy="8" r="2.6" stroke="currentColor"
+        <circle cx="8" cy="8" r="2.9" stroke="currentColor"
                 stroke-width="1.4" fill="none"/>
-        <line x1="8" y1="1.5" x2="8" y2="3.5" stroke="currentColor"
+        <line x1="8" y1="1.4" x2="8" y2="3.5" stroke="currentColor"
               stroke-width="1.4" stroke-linecap="round"/>
-        <line x1="8" y1="12.5" x2="8" y2="14.5" stroke="currentColor"
+        <line x1="8" y1="12.5" x2="8" y2="14.6" stroke="currentColor"
               stroke-width="1.4" stroke-linecap="round"/>
-        <line x1="1.5" y1="8" x2="3.5" y2="8" stroke="currentColor"
+        <line x1="1.4" y1="8" x2="3.5" y2="8" stroke="currentColor"
               stroke-width="1.4" stroke-linecap="round"/>
-        <line x1="12.5" y1="8" x2="14.5" y2="8" stroke="currentColor"
+        <line x1="12.5" y1="8" x2="14.6" y2="8" stroke="currentColor"
               stroke-width="1.4" stroke-linecap="round"/>
-        <line x1="3.4" y1="3.4" x2="4.8" y2="4.8" stroke="currentColor"
+        <line x1="3.36" y1="3.36" x2="4.84" y2="4.84" stroke="currentColor"
               stroke-width="1.4" stroke-linecap="round"/>
-        <line x1="11.2" y1="11.2" x2="12.6" y2="12.6" stroke="currentColor"
+        <line x1="11.16" y1="11.16" x2="12.64" y2="12.64" stroke="currentColor"
               stroke-width="1.4" stroke-linecap="round"/>
-        <line x1="12.6" y1="3.4" x2="11.2" y2="4.8" stroke="currentColor"
+        <line x1="12.64" y1="3.36" x2="11.16" y2="4.84" stroke="currentColor"
               stroke-width="1.4" stroke-linecap="round"/>
-        <line x1="4.8" y1="11.2" x2="3.4" y2="12.6" stroke="currentColor"
+        <line x1="4.84" y1="11.16" x2="3.36" y2="12.64" stroke="currentColor"
               stroke-width="1.4" stroke-linecap="round"/>
     </svg>`,
     // Crescent moon: filled crescent (single path) -- the one filled icon
