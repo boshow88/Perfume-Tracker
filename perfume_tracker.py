@@ -17,11 +17,28 @@ from __future__ import annotations
 import json
 import math
 import os
+import sys
 import time
 import uuid
 from datetime import datetime
 from dataclasses import dataclass, asdict, field
 from typing import Dict, List, Optional, Tuple
+
+# Enable High-DPI awareness on Windows BEFORE the first Tk root is created
+# so tkinter reports physical pixel coordinates instead of letting Windows
+# bitmap-stretch the app on HiDPI displays. macOS handles HiDPI natively;
+# Linux varies by WM but no opt-in is needed.
+if sys.platform == "win32":
+    try:
+        import ctypes
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)  # System DPI Aware (Win 8.1+)
+    except (AttributeError, OSError, ImportError):
+        # Fall back to the legacy API on older Windows; ignore failures
+        # silently -- the app still runs, just bitmap-stretched on HiDPI.
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
 
 import tkinter as tk
 
@@ -66,10 +83,81 @@ TOOLTIP_DELAY_TREEVIEW = 700  # tree cell hover, longer to avoid flicker while s
 # breathe with the rest of the UI instead of looking stuck at one size.
 BASE_FONT_SIZE = 10
 
+# DPI multiplier: 1.0 on standard 96 ppi displays, > 1.0 on HiDPI. Updated
+# by App.__init__ once a live Tk root exists (we need it to query screen
+# pitch via winfo_fpixels). Stays at 1.0 until then so anything scale_px'd
+# before the App starts is a no-op for DPI -- which is fine because no
+# widgets are constructed at module-import time.
+_DPI_FACTOR = 1.0
+
 
 def scale_px(base_px, font_size) -> int:
-    """Scale a base px dimension proportional to font_size (default 10)."""
-    return max(1, int(round(base_px * font_size / BASE_FONT_SIZE)))
+    """Scale a base px dimension proportional to font_size and screen DPI.
+
+    base_px is calibrated for BASE_FONT_SIZE (10) on a 96 ppi display.
+    The font ratio handles the user's chosen size; the DPI factor handles
+    their physical screen pitch -- so Canvas-drawn elements end up at the
+    right physical size regardless of monitor.
+    """
+    return max(1, int(round(base_px * font_size / BASE_FONT_SIZE * _DPI_FACTOR)))
+
+
+def dpi_px(n) -> int:
+    """Scale a literal pixel value to the current screen DPI.
+
+    Use this for hardcoded pixel dimensions (window geometry, Canvas widget
+    sizes, wraplength, Treeview column widths) so they stay at the same
+    physical size on HiDPI screens. Returns n unchanged on 96 ppi displays.
+    """
+    return max(1, int(round(n * _DPI_FACTOR)))
+
+
+def _install_geometry_dpi_patch():
+    """Auto-scale padx / pady / ipadx / ipady on every pack() and grid() call.
+
+    Without this, tk's `tk scaling` makes fonts physically correct on HiDPI
+    displays but leaves literal pixel padding values (padx=8 etc.) at their
+    pre-DPI size -- the result is correctly-sized text crammed together.
+    Wrapping the geometry managers themselves means none of the existing
+    ~249 pack/grid call sites need to change; they keep their authored
+    base-DPI values and the wrapper transparently multiplies by _DPI_FACTOR.
+
+    Reads _DPI_FACTOR at call time (not wrap time), so the no-op default of
+    1.0 stays a no-op until App.__init__ has detected the real ppi.
+    """
+    SCALE_KEYS = ("padx", "pady", "ipadx", "ipady")
+
+    def scale_value(v):
+        if isinstance(v, (int, float)):
+            return int(round(v * _DPI_FACTOR))
+        if isinstance(v, tuple):
+            return tuple(
+                int(round(x * _DPI_FACTOR)) if isinstance(x, (int, float)) else x
+                for x in v
+            )
+        return v
+
+    def wrap(orig):
+        def wrapped(self, cnf={}, **kw):
+            if _DPI_FACTOR != 1.0:
+                # Scale anything in cnf dict (rare in this codebase, but the
+                # tkinter signature accepts it).
+                if isinstance(cnf, dict) and cnf:
+                    cnf = {k: (scale_value(v) if k in SCALE_KEYS else v)
+                           for k, v in cnf.items()}
+                for k in SCALE_KEYS:
+                    if k in kw:
+                        kw[k] = scale_value(kw[k])
+            return orig(self, cnf, **kw)
+        return wrapped
+
+    tk.Pack.pack_configure = wrap(tk.Pack.pack_configure)
+    tk.Pack.pack = tk.Pack.pack_configure
+    tk.Grid.grid_configure = wrap(tk.Grid.grid_configure)
+    tk.Grid.grid = tk.Grid.grid_configure
+
+
+_install_geometry_dpi_patch()
 
 # Fragrantica-aligned options
 RATING_5 = ["love", "like", "ok", "dislike", "hate"]
@@ -362,7 +450,7 @@ class ToolTip:
                         background=COLORS["panel"], foreground=COLORS["text"],
                         relief="solid", borderwidth=1,
                         font=("Segoe UI", 9), padx=6, pady=3,
-                        wraplength=400)
+                        wraplength=dpi_px(400))
         label.pack()
         
     def hide(self):
@@ -1074,19 +1162,24 @@ class RangeSlider(tk.Canvas):
     
     def __init__(self, master, from_=0, to=5, var_min=None, var_max=None, 
                  width=200, height=30, on_change=None, **kwargs):
-        super().__init__(master, width=width, height=height, highlightthickness=0, **kwargs)
-        
+        # Scale all pixel-based dimensions for HiDPI displays so the slider
+        # renders at the same physical size on any screen.
+        scaled_width = dpi_px(width)
+        scaled_height = dpi_px(height)
+        super().__init__(master, width=scaled_width, height=scaled_height,
+                         highlightthickness=0, **kwargs)
+
         self.from_ = from_
         self.to = to
         self.var_min = var_min
         self.var_max = var_max
         self.on_change = on_change
-        self.width = width
-        self.height = height
-        
-        self.track_y = height // 2
-        self.handle_radius = 8
-        self.track_padding = 15
+        self.width = scaled_width
+        self.height = scaled_height
+
+        self.track_y = scaled_height // 2
+        self.handle_radius = dpi_px(8)
+        self.track_padding = dpi_px(15)
         
         self.dragging = None  # "min", "max", or None
         
@@ -1132,11 +1225,11 @@ class RangeSlider(tk.Canvas):
         # Track background
         self.create_line(self.track_padding, self.track_y, 
                         self.width - self.track_padding, self.track_y,
-                        fill=COLORS["text"], width=2)
+                        fill=COLORS["text"], width=dpi_px(2))
         
         # Selected range (use visual positions)
         self.create_line(min_x_visual, self.track_y, max_x_visual, self.track_y,
-                        fill=COLORS["accent"], width=4)
+                        fill=COLORS["accent"], width=dpi_px(4))
         
         # Min handle (use visual position)
         self.create_oval(min_x_visual - self.handle_radius, self.track_y - self.handle_radius,
@@ -2021,7 +2114,7 @@ class SortDialog(tk.Toplevel):
         ttk.Label(right, text="Active Sorts (double-click to remove)", style="Panel.TLabel", font=self.app.font_section).pack(pady=(8, 4))
         
         # Scrollable frame for active sorts
-        canvas = tk.Canvas(right, width=320, height=300, bg=COLORS["panel"], highlightthickness=0)
+        canvas = tk.Canvas(right, width=dpi_px(320), height=dpi_px(300), bg=COLORS["panel"], highlightthickness=0)
         scrollbar = ttk.Scrollbar(right, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=scrollbar.set)
         
@@ -2274,7 +2367,7 @@ class EditEventsDialog(tk.Toplevel):
         brand_name = self.app.get_brand_name(perfume.brand_id)
         self.title(f"Events - {brand_name} {perfume.name}")
         self.configure(bg=COLORS["bg"])
-        self.geometry("600x450")
+        self.geometry(f"{dpi_px(600)}x{dpi_px(450)}")
         self.transient(parent)
         self.grab_set()
         
@@ -2320,11 +2413,11 @@ class EditEventsDialog(tk.Toplevel):
         self.tree.heading("detail", text="Detail")
         self.tree.heading("note", text="Note")
         
-        self.tree.column("date", width=90, anchor="center")
-        self.tree.column("action", width=70, anchor="center")
-        self.tree.column("location", width=120)
-        self.tree.column("detail", width=130)
-        self.tree.column("note", width=150)
+        self.tree.column("date", width=dpi_px(90), anchor="center")
+        self.tree.column("action", width=dpi_px(70), anchor="center")
+        self.tree.column("location", width=dpi_px(120))
+        self.tree.column("detail", width=dpi_px(130))
+        self.tree.column("note", width=dpi_px(150))
         
         scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
@@ -2520,7 +2613,7 @@ class EditEventsDialog(tk.Toplevel):
         win.configure(bg=COLORS["bg"])
         win.transient(self)
         win.grab_set()
-        win.geometry("360x180")
+        win.geometry(f"{dpi_px(360)}x{dpi_px(180)}")
         
         main_frame = ttk.Frame(win, style="TFrame")
         main_frame.pack(fill="both", expand=True, padx=15, pady=10)
@@ -2766,7 +2859,7 @@ class ManageDataDialog(tk.Toplevel):
         super().__init__(parent)
         self.title("Manage Data")
         self.configure(bg=COLORS["bg"])
-        self.geometry("650x550")
+        self.geometry(f"{dpi_px(650)}x{dpi_px(550)}")
         self.resizable(True, True)
         self.transient(parent)
         
@@ -3222,7 +3315,7 @@ class FilterDialog(tk.Toplevel):
         super().__init__(parent)
         self.title("Filter Configuration")
         self.configure(bg=COLORS["bg"])
-        self.geometry("600x700")
+        self.geometry(f"{dpi_px(600)}x{dpi_px(700)}")
         
         self.current_config = current_config
         self.perfumes = perfumes
@@ -3962,7 +4055,7 @@ class FilterDialog(tk.Toplevel):
         
         ttk.Label(parent,
                  text="Leave empty for no bound. Perfumes without a year are excluded when this filter is active.",
-                 style="Muted.TLabel", wraplength=480, justify="left").pack(anchor="w", padx=4, pady=(4, 0))
+                 style="Muted.TLabel", wraplength=dpi_px(480), justify="left").pack(anchor="w", padx=4, pady=(4, 0))
     
     def _create_vote_status_section(self, parent):
         """Create vote status checkboxes in a single row"""
@@ -4320,10 +4413,13 @@ class SettingsDialog(tk.Toplevel):
         natural_w = self.winfo_reqwidth()
         natural_h = self.winfo_reqheight()
         screen_h = self.winfo_screenheight()
-        max_h = max(420, screen_h - 160)   # leave room for taskbar etc.
+        # `screen_h` and natural_w/h are already in physical pixels (Tk is
+        # DPI-aware); scale the literal reserves so the taskbar/title-bar
+        # allowance and minimum height grow with the user's DPI factor.
+        max_h = max(dpi_px(420), screen_h - dpi_px(160))
         init_h = min(natural_h, max_h)
         self.geometry(f"{natural_w}x{init_h}")
-        self.minsize(natural_w, 420)
+        self.minsize(natural_w, dpi_px(420))
         self.resizable(False, True)
         
         # Handle window close (X button) as Cancel
@@ -4453,7 +4549,7 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(import_frame,
                  text="When importing Fragrantica text, attempt to extract the release year. "
                       "Existing year values will only be overwritten after confirmation.",
-                 style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w", padx=8, pady=(0, 4))
+                 style="Muted.TLabel", wraplength=dpi_px(420), justify="left").pack(anchor="w", padx=8, pady=(0, 4))
 
         # === Section: Vote Source for Sort & Filter ===
         # Affects how the app picks a numeric score when sorting or filtering
@@ -4466,7 +4562,7 @@ class SettingsDialog(tk.Toplevel):
 
         ttk.Label(source_frame,
                   text="Which side of the data drives Sort and the score-range Filters?",
-                  style="TLabel", wraplength=420, justify="left").pack(anchor="w", padx=8, pady=(4, 6))
+                  style="TLabel", wraplength=dpi_px(420), justify="left").pack(anchor="w", padx=8, pady=(4, 6))
 
         self.vote_source_var = tk.StringVar(value=self.app.app_data.vote_source)
         source_options = [
@@ -4486,14 +4582,14 @@ class SettingsDialog(tk.Toplevel):
             ttk.Radiobutton(opt_row, text=label, variable=self.vote_source_var,
                             value=value, style="TRadiobutton").pack(anchor="w")
             ttk.Label(opt_row, text=desc, style="Muted.TLabel",
-                      wraplength=400, justify="left").pack(anchor="w", padx=(24, 0), pady=(0, 2))
+                      wraplength=dpi_px(400), justify="left").pack(anchor="w", padx=(24, 0), pady=(0, 2))
         
         # === Section: Insert Position ===
         insert_frame = ttk.LabelFrame(main, text=" New Perfume Insert Position ", style="TLabelframe")
         insert_frame.pack(fill="x", pady=(0, 12), ipadx=8, ipady=6)
         
         ttk.Label(insert_frame, text="When a sort is active, where should a newly added perfume go in the manual order?",
-                 style="TLabel", wraplength=420, justify="left").pack(anchor="w", padx=8, pady=(4, 6))
+                 style="TLabel", wraplength=dpi_px(420), justify="left").pack(anchor="w", padx=8, pady=(4, 6))
         
         self.insert_pos_var = tk.StringVar(value=self.app.app_data.sort_active_insert_position)
         insert_options = [
@@ -4507,7 +4603,7 @@ class SettingsDialog(tk.Toplevel):
             ttk.Radiobutton(opt_row, text=label, variable=self.insert_pos_var, value=value,
                            style="TRadiobutton").pack(anchor="w")
             ttk.Label(opt_row, text=desc, style="Muted.TLabel",
-                     wraplength=400, justify="left").pack(anchor="w", padx=(24, 0), pady=(0, 2))
+                     wraplength=dpi_px(400), justify="left").pack(anchor="w", padx=(24, 0), pady=(0, 2))
     
     def _on_font_preview(self, event=None):
         """Preview font size change (don't save yet)"""
@@ -4560,8 +4656,25 @@ class SettingsDialog(tk.Toplevel):
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
+        # DPI detection: SetProcessDpiAwareness was already called at module
+        # import (Windows only). Now that a live Tk root exists, query the
+        # actual screen pitch and:
+        #   - update the module-level _DPI_FACTOR so scale_px / dpi_px reflect
+        #     the real ppi (1.0 on 96 ppi, ~1.5 on 150% Windows scaling, etc.)
+        #   - set tk's own scaling factor (pixels per point) so named fonts
+        #     render at correct physical size; without this, "10pt" on a
+        #     200% display would otherwise come out half its intended size.
+        global _DPI_FACTOR
+        try:
+            actual_dpi = self.winfo_fpixels("1i")  # ppi at this display
+            if actual_dpi and actual_dpi > 0:
+                _DPI_FACTOR = actual_dpi / 96.0
+                self.tk.call("tk", "scaling", actual_dpi / 72.0)
+        except (tk.TclError, ZeroDivisionError):
+            pass  # leave _DPI_FACTOR at 1.0; tk falls back to its default
+
         self.title("Perfume Tracker (tkinter prototype)")
-        self.geometry("1200x720")
+        self.geometry(f"{dpi_px(1200)}x{dpi_px(720)}")
         self.configure(bg=COLORS["bg"])
 
         # Fix paste on Windows - ensure Ctrl+V triggers <<Paste>>
@@ -4791,17 +4904,34 @@ class App(tk.Tk):
             self.font_small.configure(size=int(fs * 0.8))
             self.font_section.configure(size=int(fs * 1.1), weight="bold")
         
-        # Global font
+        # Global font (covers tk widgets like tk.Label, tk.Entry, tk.Listbox, ...)
         self.option_add("*Font", self.font_normal)
         
-        # ttk styles with font
+        # ttk styles with font.  Every style that holds visible text needs an
+        # explicit font configure - option_add does not propagate to ttk.
         self.style.configure("TLabel", font=self.font_normal)
         self.style.configure("Panel.TLabel", font=self.font_normal)
         self.style.configure("Muted.TLabel", font=self.font_normal)
         self.style.configure("TButton", font=self.font_normal)
+        self.style.configure("Small.TButton", font=self.font_small)
         self.style.configure("TEntry", font=self.font_normal)
         self.style.configure("TCombobox", font=self.font_normal)
-        self.style.configure("Treeview", font=self.font_normal, rowheight=int(fs * 2))
+        self.style.configure("TCheckbutton", font=self.font_normal)
+        self.style.configure("TRadiobutton", font=self.font_normal)
+        # LabelFrame title text (e.g. "Appearance", "Location", "Tag")
+        self.style.configure("TLabelframe.Label", font=self.font_section)
+
+        # Treeview row height: derive from actual rendered font height so it
+        # tracks both font_size changes AND DPI scaling.  fs is in points,
+        # rowheight is in physical pixels - the old `fs * 2` formula mixed
+        # the two and left rows cramped on HiDPI.  metrics("linespace")
+        # already returns physical pixels for the font.
+        try:
+            line_h = self.font_normal.metrics("linespace")
+        except tk.TclError:
+            line_h = int(fs * 2)
+        self.style.configure("Treeview", font=self.font_normal,
+                             rowheight=line_h + dpi_px(8))
         self.style.configure("Treeview.Heading", font=self.font_bold)
         
         # Update Treeview row height based on font size
@@ -4898,11 +5028,11 @@ class App(tk.Tk):
         self.tree.heading("year", text="Year")
         self.tree.heading("locations", text="Location")
         
-        self.tree.column("brand", width=80, anchor="w")
-        self.tree.column("name", width=240, anchor="w")
-        self.tree.column("concentration", width=60, stretch=False, anchor="w")
-        self.tree.column("year", width=50, stretch=False, anchor="center")
-        self.tree.column("locations", width=100, anchor="w")
+        self.tree.column("brand", width=dpi_px(80), anchor="w")
+        self.tree.column("name", width=dpi_px(240), anchor="w")
+        self.tree.column("concentration", width=dpi_px(60), stretch=False, anchor="w")
+        self.tree.column("year", width=dpi_px(50), stretch=False, anchor="center")
+        self.tree.column("locations", width=dpi_px(100), anchor="w")
 
         yscroll = ttk.Scrollbar(tree_frame, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=yscroll.set)
@@ -6060,7 +6190,7 @@ class App(tk.Tk):
         """Show popup window with full note content"""
         popup = tk.Toplevel(self)
         popup.title(note.title)
-        popup.geometry("400x300")
+        popup.geometry(f"{dpi_px(400)}x{dpi_px(300)}")
         popup.configure(bg=COLORS["panel"])
         popup.transient(self)
         
@@ -6107,7 +6237,7 @@ class App(tk.Tk):
         container.pack(fill="both", expand=True)
         
         # Create scrollable frame
-        canvas = tk.Canvas(container, bg=COLORS["panel"], highlightthickness=0, width=230)
+        canvas = tk.Canvas(container, bg=COLORS["panel"], highlightthickness=0, width=dpi_px(230))
         scrollbar = ttk.Scrollbar(container, orient="vertical", command=canvas.yview)
         scrollable_frame = ttk.Frame(canvas, style="Panel.TFrame")
         
@@ -6130,14 +6260,14 @@ class App(tk.Tk):
         # Update to calculate content size
         scrollable_frame.update_idletasks()
         content_height = scrollable_frame.winfo_reqheight()
-        max_height = 300
+        max_height = dpi_px(300)
         
         # Determine if scrollbar is needed
         if content_height > max_height:
             # Need scrollbar
             canvas.pack(side="left", fill="both", expand=True, padx=(10, 0), pady=10)
             scrollbar.pack(side="right", fill="y", pady=10, padx=(0, 5))
-            popup.geometry(f"250x{max_height}")
+            popup.geometry(f"{dpi_px(250)}x{max_height}")
             
             # Configure scroll region
             scrollable_frame.bind(
@@ -6156,7 +6286,7 @@ class App(tk.Tk):
         else:
             # No scrollbar needed - fit to content
             canvas.pack(fill="both", expand=True, padx=10, pady=10)
-            popup.geometry(f"250x{content_height + 20}")
+            popup.geometry(f"{dpi_px(250)}x{content_height + dpi_px(20)}")
         
         # Position popup near the tags label
         x = self.tags_label.winfo_rootx()
@@ -6314,21 +6444,25 @@ class App(tk.Tk):
                 return
             
             # Reserve a small amount for the vertical scrollbar
-            SCROLLBAR_RESERVE = 18
-            available = max(total_width - SCROLLBAR_RESERVE, 200)
-            
-            fixed_sum = sum(self._COL_FIXED_WIDTHS.get(c, 0)
+            scrollbar_reserve = dpi_px(18)
+            available = max(total_width - scrollbar_reserve, dpi_px(200))
+
+            # Fixed widths in the dict are stored at base DPI; apply dpi_px
+            # only when consumed so the dict can stay declared as a class
+            # constant (evaluated at module import, before _DPI_FACTOR is
+            # set by App.__init__).
+            fixed_sum = sum(dpi_px(self._COL_FIXED_WIDTHS[c])
                             for c in visible_cols if c in self._COL_FIXED_WIDTHS)
             stretchy_cols = [c for c in visible_cols if c not in self._COL_FIXED_WIDTHS]
             prop_total = sum(self._COL_STRETCH_PROPORTIONS.get(c, 1.0) for c in stretchy_cols) or 1.0
-            
-            remaining = max(available - fixed_sum, 200)
+
+            remaining = max(available - fixed_sum, dpi_px(200))
             for col in visible_cols:
                 if col in self._COL_FIXED_WIDTHS:
-                    self.tree.column(col, width=self._COL_FIXED_WIDTHS[col], stretch=False)
+                    self.tree.column(col, width=dpi_px(self._COL_FIXED_WIDTHS[col]), stretch=False)
                 else:
                     weight = self._COL_STRETCH_PROPORTIONS.get(col, 1.0) / prop_total
-                    self.tree.column(col, width=max(int(remaining * weight), 60), stretch=True)
+                    self.tree.column(col, width=max(int(remaining * weight), dpi_px(60)), stretch=True)
         except tk.TclError:
             pass
     
@@ -6458,7 +6592,7 @@ class App(tk.Tk):
         win = tk.Toplevel(self)
         win.title("Add Perfume" if is_new else "Edit Info")
         win.configure(bg=COLORS["bg"])
-        win.geometry("450x500")
+        win.geometry(f"{dpi_px(450)}x{dpi_px(500)}")
         win.transient(self)
 
         frm = ttk.Frame(win, style="TFrame")
@@ -6722,7 +6856,7 @@ class App(tk.Tk):
         win = tk.Toplevel(self)
         win.title("Notes & Links")
         win.configure(bg=COLORS["bg"])
-        win.geometry("550x550")
+        win.geometry(f"{dpi_px(550)}x{dpi_px(550)}")
         win.transient(self)
 
         frm = ttk.Frame(win, style="TFrame")
@@ -6800,7 +6934,7 @@ class App(tk.Tk):
             edit_win = tk.Toplevel(win)
             edit_win.title("Edit Link")
             edit_win.configure(bg=COLORS["bg"])
-            edit_win.geometry("400x140")
+            edit_win.geometry(f"{dpi_px(400)}x{dpi_px(140)}")
             edit_win.transient(win)
             edit_win.grab_set()
             
@@ -6965,7 +7099,7 @@ class App(tk.Tk):
         win = tk.Toplevel(parent_win)
         win.title("Manage Note Titles")
         win.configure(bg=COLORS["bg"])
-        win.geometry("300x250")
+        win.geometry(f"{dpi_px(300)}x{dpi_px(250)}")
         win.transient(parent_win)
         win.grab_set()
         
@@ -7044,7 +7178,7 @@ class App(tk.Tk):
         win = tk.Toplevel(parent_win)
         win.title("Edit Note" if is_edit else "Add Note")
         win.configure(bg=COLORS["bg"])
-        win.geometry("450x350")
+        win.geometry(f"{dpi_px(450)}x{dpi_px(350)}")
         win.transient(parent_win)
         win.grab_set()
         
@@ -7292,7 +7426,7 @@ class App(tk.Tk):
         win = tk.Toplevel(self)
         win.title("Edit Fragrantica Vote Data")
         win.configure(bg=COLORS["bg"])
-        win.geometry("550x500")
+        win.geometry(f"{dpi_px(550)}x{dpi_px(500)}")
         win.resizable(True, True)
         win.transient(self)  # Keep on top of main window
 
@@ -7422,7 +7556,7 @@ class App(tk.Tk):
         # Status label for warnings
         status_var = tk.StringVar(value="")
         status_label = ttk.Label(main_frame, textvariable=status_var, style="Muted.TLabel", 
-                                 wraplength=560)
+                                 wraplength=dpi_px(560))
         status_label.pack(anchor="w", pady=(8, 0))
         
         def do_parse():
