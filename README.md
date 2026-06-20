@@ -131,7 +131,7 @@ Listed left-to-right as they appear in the toolbar:
 ### Right Panel Detail
 - **Brand**: Displayed as title (first line), hover for full text
 - **Name · Concentration · Year**: Displayed as subtitle (e.g., "Sauvage · EdP · 2015"). Year omitted if unset.
-- **State**: Displayed as gray text (e.g., "Owned", "Smelled")
+- **State**: Displayed as gray text (e.g., "Owned 100ml | Smelled", "Past-owned"). See **Settings → Owned Matching** for what counts as Owned.
 - **Tags**: Displayed as gray text, click to expand popup with full tag list
 - **Links**: Click to open, hover for full URL
 
@@ -303,7 +303,7 @@ Manage in the Memo dialog:
 |---------|-------------|
 | Font Size | App-wide font size (live preview, persisted on Save) |
 | Columns | Show / hide the optional Treeview columns (Concentration, Year, Location). Also toggleable via right-click on the column headers. |
-| Owned ml Formats | Which purchase types count toward the "Owned ml" derived value |
+| Owned Matching | Full bottles always count. Two optional toggles broaden the definition: **Also count decants** (decant ml contributes to Owned the same way as full bottles) and **Also count perfumes you used to own** (perfumes whose current ml has dropped to 0 still match the Owned filter when there was at least one prior positive ml purchase; their state shows "Past-owned"). |
 | Auto-detect year on Fragrantica import | When enabled, attempts to extract the release year from imported Fragrantica text. The detected year fills the Year entry in the Fragrantica dialog (overwrite confirmation if a different value was already there). The change is committed only when you press Save. |
 | Insert position when sort is active | Where a newly added perfume goes in the **real (manual) order** when a sort is active: **Below selected** (default) / **Append to end** / **Match sort view position** |
 | Vote Source for Sort & Filter | Which side of the data drives Sort and the score-range Filters for Rating / Longevity / Sillage / Price Value / Gender: **Fragrantica** (default, crowd numbers), **Personal** (only your votes; missing votes count as no data), or **Fallback** (Personal where you've voted, Fragrantica otherwise). Other filters (When-to-Wear, "Has data", gender preference) are unaffected. |

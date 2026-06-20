@@ -28,7 +28,11 @@ let filteredPerfumes = [];
 let selectedPerfumeId = null;
 
 let brandsMap = {};
-let ownedMlIncludeFormats = ['full'];  // Default: only full bottles count
+// Owned-matching configuration (mirrors desktop AppData.include_decant /
+// include_past_owned).  Full bottles always count; these flags broaden the
+// definition.  See deriveState / getStateCategory for the rules.
+let includeDecant = false;
+let includePastOwned = false;
 let voteSource = 'fragrantica';        // 'fragrantica' | 'personal' | 'fallback'
 let concentrationsMap = {};
 let outletsMap = {};
@@ -194,7 +198,12 @@ async function loadData() {
         tagsMap = appData.tags_map || {};
         noteTitlesMap = appData.note_titles_map || {};
         purchaseTypesMap = appData.purchase_types_map || {};
-        ownedMlIncludeFormats = appData.owned_ml_include_formats || ['full'];
+        // Owned-matching flags (new schema; legacy
+        // owned_ml_include_formats is no longer consulted -- the new code and
+        // data ship together, so missing keys just fall back to the safe
+        // historical defaults of False / False).
+        includeDecant = !!appData.include_decant;
+        includePastOwned = !!appData.include_past_owned;
 
         // Vote source for sort/filter (mirrors desktop AppData.vote_source).
         // Web is read-only: we honour the value the desktop saved, and any
@@ -634,18 +643,9 @@ function getStateCategory(p) {
     const events = p.events || [];
     if (events.length === 0) return 'new';
 
-    let ownedMl = 0;
-    for (const e of events) {
-        if (e.ml_delta !== null && e.ml_delta !== undefined) {
-            // Only count if purchase_type is in ownedMlIncludeFormats
-            const purchaseType = purchaseTypesMap[e.purchase_type_id] || '';
-            if (ownedMlIncludeFormats.includes(purchaseType)) {
-                ownedMl += e.ml_delta;
-            }
-        }
-    }
-
-    if (ownedMl > 0) return 'owned';
+    // Past-owned is treated as 'owned' for sort priority purposes, matching
+    // how the Owned filter checkbox treats both cases as a single axis.
+    if (computeOwnedSnapshot(p).ownedMatch) return 'owned';
 
     const hasSmelled = events.some(e => e.event_type === 'smell' || e.event_type === 'skin');
     if (hasSmelled) return 'smelled';
@@ -757,18 +757,44 @@ function renderDetailPanel(p) {
     renderTags(p);
 }
 
+// Shared "Owned" computation -- mirrors derive_state in perfume_tracker.py.
+// Full bottles always count.  Decant ml is included when includeDecant is on.
+// Other custom purchase types are intentionally ignored until exposed in UI.
+function computeOwnedSnapshot(p) {
+    const validTypes = new Set(['full']);
+    if (includeDecant) validTypes.add('decant');
+
+    let currentMl = 0;
+    let hadPositivePast = false;
+    for (const e of (p.events || [])) {
+        if (e.ml_delta === null || e.ml_delta === undefined) continue;
+        const purchaseType = purchaseTypesMap[e.purchase_type_id] || '';
+        if (!validTypes.has(purchaseType)) continue;
+        const delta = e.ml_delta;
+        currentMl += delta;
+        if (delta > 0) hadPositivePast = true;
+    }
+    const isCurrentlyOwned = currentMl > 0;
+    const isPastOwned = includePastOwned && !isCurrentlyOwned && hadPositivePast;
+    return {
+        currentMl,
+        isCurrentlyOwned,
+        isPastOwned,
+        ownedMatch: isCurrentlyOwned || isPastOwned,
+    };
+}
+
 function deriveState(p) {
     const events = p.events || [];
     if (events.length === 0) return 'New';
-    
-    let ownedMl = 0;
+
     let hasSmelled = false;
     let hasOnSkin = false;
-    
+
     // Check most recent want/unwant event to determine current want status
     let hasWant = false;
     let latestWantTs = null;
-    
+
     for (const e of events) {
         if (e.event_type === 'smell') {
             hasSmelled = true;
@@ -783,21 +809,17 @@ function deriveState(p) {
                 hasWant = (e.event_type === 'want');
             }
         }
-        if (e.ml_delta !== null && e.ml_delta !== undefined) {
-            // Only count if purchase_type is in ownedMlIncludeFormats
-            const purchaseType = purchaseTypesMap[e.purchase_type_id] || '';
-            if (ownedMlIncludeFormats.includes(purchaseType)) {
-                ownedMl += e.ml_delta;
-            }
-        }
     }
-    
+
+    const owned = computeOwnedSnapshot(p);
+
     const parts = [];
     if (hasSmelled) parts.push('Smelled');
     if (hasOnSkin) parts.push('On-skin');
-    if (ownedMl > 0) parts.push(`Owned ${ownedMl}ml`);
+    if (owned.isCurrentlyOwned) parts.push(`Owned ${owned.currentMl}ml`);
+    else if (owned.isPastOwned) parts.push('Past-owned');
     if (hasWant) parts.push('Want');
-    
+
     if (parts.length === 0) return 'New';
     return parts.join(' | ');
 }
@@ -1086,8 +1108,9 @@ function applyFiltersAndSort() {
         // State filter
         if (filters.states.length > 0) {
             const state = deriveState(p).toLowerCase();
+            const ownedMatch = computeOwnedSnapshot(p).ownedMatch;
             const matchesState = filters.states.some(s => {
-                if (s === 'owned') return state.includes('owned');
+                if (s === 'owned') return ownedMatch;
                 if (s === 'smelled') return state.includes('smelled');
                 if (s === 'on-skin') return state.includes('on-skin');
                 if (s === 'want') return state.includes('want');
@@ -1330,35 +1353,31 @@ function closeAllModals() {
 // ============================================
 
 let originalFontSize = 10;
-let originalOwnedFormats = ['full'];
+let originalIncludeDecant = false;
+let originalIncludePastOwned = false;
 let originalVoteSource = 'fragrantica';
 
 function openSettingsModal() {
     const modal = document.getElementById('settings-modal');
     modal.classList.remove('hidden');
-    
+
     // Store original values for reset
     originalFontSize = appData.font_size || 10;
-    originalOwnedFormats = [...ownedMlIncludeFormats];
+    originalIncludeDecant = includeDecant;
+    originalIncludePastOwned = includePastOwned;
     originalVoteSource = voteSource;
-    
+
     // Set font size slider
     const slider = document.getElementById('settings-font-size');
     const currentPt = Math.round(parseInt(document.documentElement.style.fontSize || '13') / 1.33);
     slider.value = currentPt;
     document.getElementById('settings-font-size-label').textContent = currentPt + 'pt';
-    
-    // Populate owned formats checkboxes
-    const container = document.getElementById('settings-owned-formats');
-    container.innerHTML = '';
-    for (const [id, name] of Object.entries(purchaseTypesMap)) {
-        const checked = ownedMlIncludeFormats.includes(name) ? 'checked' : '';
-        container.innerHTML += `
-            <label class="checkbox-item">
-                <input type="checkbox" value="${name}" ${checked}> ${name}
-            </label>
-        `;
-    }
+
+    // Restore owned-matching toggles
+    const decantInput = document.getElementById('settings-include-decant');
+    const pastInput = document.getElementById('settings-include-past-owned');
+    if (decantInput) decantInput.checked = includeDecant;
+    if (pastInput) pastInput.checked = includePastOwned;
 
     // Restore vote source radio
     document.querySelectorAll('#settings-vote-source input[name="vote-source"]').forEach(r => {
@@ -1374,9 +1393,11 @@ function previewFontSize() {
 }
 
 function applySettings() {
-    // Get selected owned formats
-    const checkboxes = document.querySelectorAll('#settings-owned-formats input:checked');
-    ownedMlIncludeFormats = Array.from(checkboxes).map(cb => cb.value);
+    // Owned-matching toggles
+    const decantInput = document.getElementById('settings-include-decant');
+    const pastInput = document.getElementById('settings-include-past-owned');
+    if (decantInput) includeDecant = decantInput.checked;
+    if (pastInput) includePastOwned = pastInput.checked;
 
     // Get selected vote source
     const sourceInput = document.querySelector('#settings-vote-source input[name="vote-source"]:checked');
@@ -1385,7 +1406,7 @@ function applySettings() {
     }
 
     closeAllModals();
-    applyFiltersAndSort();  // Refresh list with new owned ml + vote source
+    applyFiltersAndSort();  // Refresh list with new owned-matching + vote source
 }
 
 function resetSettings() {
@@ -1393,13 +1414,14 @@ function resetSettings() {
     document.getElementById('settings-font-size').value = originalFontSize;
     document.getElementById('settings-font-size-label').textContent = originalFontSize + 'pt';
     document.documentElement.style.fontSize = Math.round(originalFontSize * 1.33) + 'px';
-    
-    ownedMlIncludeFormats = [...originalOwnedFormats];
-    
-    // Update checkboxes
-    document.querySelectorAll('#settings-owned-formats input').forEach(cb => {
-        cb.checked = ownedMlIncludeFormats.includes(cb.value);
-    });
+
+    // Reset owned-matching toggles
+    includeDecant = originalIncludeDecant;
+    includePastOwned = originalIncludePastOwned;
+    const decantInput = document.getElementById('settings-include-decant');
+    const pastInput = document.getElementById('settings-include-past-owned');
+    if (decantInput) decantInput.checked = includeDecant;
+    if (pastInput) pastInput.checked = includePastOwned;
 
     // Reset vote source radio
     voteSource = originalVoteSource;

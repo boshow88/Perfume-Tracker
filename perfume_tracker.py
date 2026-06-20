@@ -385,8 +385,16 @@ class AppData:
     })
     # UI preferences
     font_size: int = 10
-    # Format names that count toward "Owned ml" (default: full only)
-    owned_ml_include_formats: List[str] = field(default_factory=lambda: ["full"])
+    # "Owned" matching configuration.
+    # Full bottles always count.  These two flags extend the definition:
+    #   include_decant     : also count purchase_type == "decant"
+    #   include_past_owned : also match perfumes whose current ml is <= 0 but
+    #                        had at least one positive ml event with an
+    #                        included purchase_type in the past.
+    # Both default off, matching the historical behaviour where only currently
+    # held full bottles produced an "Owned Xml" state.
+    include_decant: bool = False
+    include_past_owned: bool = False
     # Where to insert a newly created perfume into the real (manual) order when a sort is active.
     # Valid values: "below_selected", "append", "sort_view"
     sort_active_insert_position: str = "below_selected"
@@ -663,7 +671,12 @@ def load_app_data() -> AppData:
     
     # Load font size preference
     app_data.font_size = raw.get("font_size", 10)
-    app_data.owned_ml_include_formats = raw.get("owned_ml_include_formats", ["full"])
+    # Owned-matching flags.  Older files may still have the legacy
+    # owned_ml_include_formats list; we no longer read it -- the new schema
+    # ships together with the new code, so missing keys just fall back to the
+    # safe defaults (False, False) which preserve the old behaviour.
+    app_data.include_decant = bool(raw.get("include_decant", False))
+    app_data.include_past_owned = bool(raw.get("include_past_owned", False))
     insert_pos = raw.get("sort_active_insert_position", "below_selected")
     if insert_pos in ("below_selected", "append", "sort_view"):
         app_data.sort_active_insert_position = insert_pos
@@ -792,7 +805,8 @@ def save_app_data(app_data: AppData):
         "note_titles_map": app_data.note_titles_map,
         "sort_modes": app_data.sort_modes,
         "font_size": app_data.font_size,
-        "owned_ml_include_formats": app_data.owned_ml_include_formats,
+        "include_decant": app_data.include_decant,
+        "include_past_owned": app_data.include_past_owned,
         "sort_active_insert_position": app_data.sort_active_insert_position,
         "import_year_from_fragrantica": app_data.import_year_from_fragrantica,
         "column_visibility": app_data.column_visibility,
@@ -806,26 +820,61 @@ def save_app_data(app_data: AppData):
 # -----------------------------
 # Derived state (event-driven)
 # -----------------------------
-def derive_state(p: Perfume, tag_names: List[str] = None, included_purchase_types: Optional[List[str]] = None) -> Tuple[str, float]:
+def derive_state(p: Perfume, tag_names: List[str] = None,
+                 include_decant: bool = False,
+                 include_past_owned: bool = False) -> Tuple[str, bool]:
     """
     Returns:
-      (state_string, owned_ml)
-    Rule of thumb:
-      - tested? if any smell/skin exists
-      - on_skin? if any skin exists
-      - owned_ml = sum(ml_delta for events whose purchase_type is in included_purchase_types)
-      - want? if any event has event_type == "want"
-    
-    included_purchase_types: if provided, only events with this purchase_type name count toward owned_ml.
+      (state_string, owned_match)
+
+    Rules:
+      - tested?  any smell/skin event exists
+      - on_skin? any skin event exists
+      - owned_match: True when this perfume should match the "Owned" filter.
+        Driven by `include_decant` and `include_past_owned`:
+          * Full-bottle events (purchase_type == "full") always count.
+          * Decant events count only when include_decant is True.
+          * Other custom purchase types are ignored.
+        With include_past_owned=False (default), owned_match = (current ml > 0).
+        With include_past_owned=True, owned_match also fires when the current
+        ml is <= 0 but at least one qualifying event added ml in the past --
+        i.e. perfumes you used to own.
+      - want? most recent want/unwant event is "want"
+
+    State string carries:
+      * "Owned <n>ml" when current ml > 0
+      * "Past-owned" when ml is <= 0 but include_past_owned matched a past
+        positive event (no number, since current is zero).
     """
     tested = any(e.event_type in ("smell", "skin") for e in p.events)
     on_skin = any(e.event_type == "skin" for e in p.events)
-    owned_ml = 0.0
-    included = set(included_purchase_types) if included_purchase_types is not None else None
+
+    # Which purchase-type names contribute toward the Owned definition.
+    # "full" is always implicit; "decant" is gated on the user setting; any
+    # other custom type is intentionally ignored until we expose it.
+    valid_types = {"full"}
+    if include_decant:
+        valid_types.add("decant")
+
+    current_ml = 0.0
+    had_positive_past = False
     for e in p.events:
-        if e.ml_delta is not None:
-            if included is None or (e.purchase_type or "").strip() in included:
-                owned_ml += float(e.ml_delta)
+        if e.ml_delta is None:
+            continue
+        if (e.purchase_type or "").strip() not in valid_types:
+            continue
+        delta = float(e.ml_delta)
+        current_ml += delta
+        if delta > 0:
+            had_positive_past = True
+
+    is_currently_owned = current_ml > 0
+    is_past_owned = (
+        include_past_owned
+        and not is_currently_owned
+        and had_positive_past
+    )
+    owned_match = is_currently_owned or is_past_owned
 
     # Check most recent want/unwant event to determine current want status
     want = False
@@ -842,15 +891,17 @@ def derive_state(p: Perfume, tag_names: List[str] = None, included_purchase_type
         parts.append("Smelled")
     if on_skin:
         parts.append("On-skin")
-    if owned_ml > 0:
-        parts.append(f"Owned {owned_ml:g}ml")
+    if is_currently_owned:
+        parts.append(f"Owned {current_ml:g}ml")
+    elif is_past_owned:
+        parts.append("Past-owned")
     if want:
         parts.append("Want")
 
     if not parts:
-        return ("New", owned_ml)
+        return ("New", owned_match)
 
-    return (" | ".join(parts), owned_ml)
+    return (" | ".join(parts), owned_match)
 
 
 # -----------------------------
@@ -4275,9 +4326,14 @@ class FilterDialog(tk.Toplevel):
         # States
         if config.states:
             tag_names = [self.app.get_tag_name(tid) for tid in p.tag_ids] if self.app else []
-            state, owned_ml = derive_state(p, tag_names, self.app.app_data.owned_ml_include_formats)
+            ad = self.app.app_data if self.app else None
+            state, owned_match = derive_state(
+                p, tag_names,
+                bool(getattr(ad, "include_decant", False)),
+                bool(getattr(ad, "include_past_owned", False)),
+            )
             matches_state = False
-            if "owned" in config.states and owned_ml > 0:
+            if "owned" in config.states and owned_match:
                 matches_state = True
             if "tested" in config.states and "Smelled" in state:
                 matches_state = True
@@ -4487,7 +4543,8 @@ class SettingsDialog(tk.Toplevel):
         
         # Store original values for cancel/restore (only for live-previewed settings)
         self.original_font_size = self.app.font_size
-        self.original_owned_ml_formats = list(self.app.app_data.owned_ml_include_formats)
+        self.original_include_decant = bool(self.app.app_data.include_decant)
+        self.original_include_past_owned = bool(self.app.app_data.include_past_owned)
         
         self._build_ui()
         
@@ -4605,24 +4662,39 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(columns_frame, text="Brand and Name are always visible.",
                  style="Muted.TLabel").pack(anchor="w", padx=8, pady=(2, 4))
         
-        # === Section: Owned ml ===
-        owned_frame = ttk.LabelFrame(main, text=" Owned ml Calculation ", style="TLabelframe")
+        # === Section: Owned matching ===
+        # Full bottles always count.  These two toggles extend the definition;
+        # the previous "format checkbox grid" was redundant because nobody
+        # would intentionally exclude full bottles from the Owned tally.
+        owned_frame = ttk.LabelFrame(main, text=" Owned Matching ", style="TLabelframe")
         owned_frame.pack(fill="x", pady=(0, 12), ipadx=8, ipady=6)
-        
-        ttk.Label(owned_frame, text="Formats that count toward Owned ml:",
-                 style="TLabel").pack(anchor="w", padx=8, pady=(4, 4))
-        fmt_grid = ttk.Frame(owned_frame, style="TFrame")
-        fmt_grid.pack(fill="x", padx=16, pady=(0, 4))
-        self.owned_ml_format_vars = {}
-        included = set(self.app.app_data.owned_ml_include_formats)
-        for i, name in enumerate(self.app.get_all_purchase_type_names()):
-            var = tk.BooleanVar(value=name in included)
-            self.owned_ml_format_vars[name] = var
-            row, col = divmod(i, 3)
-            ttk.Checkbutton(fmt_grid, text=name, variable=var,
-                           style="TCheckbutton").grid(row=row, column=col, sticky="w", padx=(0, 24), pady=2)
-        ttk.Label(owned_frame, text="Only checked formats are summed when computing the Owned ml total.",
-                 style="Muted.TLabel").pack(anchor="w", padx=8, pady=(2, 4))
+
+        ttk.Label(owned_frame,
+                  text="Full bottles always count toward Owned. Use the toggles below "
+                       "to broaden the definition.",
+                  style="Muted.TLabel", wraplength=dpi_px(420),
+                  justify="left").pack(anchor="w", padx=8, pady=(4, 6))
+
+        self.include_decant_var = tk.BooleanVar(value=self.app.app_data.include_decant)
+        ttk.Checkbutton(owned_frame, text="Also count decants",
+                        variable=self.include_decant_var,
+                        style="TCheckbutton").pack(anchor="w", padx=12, pady=(0, 0))
+        ttk.Label(owned_frame,
+                  text="When on, decant purchases (positive ml) contribute to Owned the "
+                       "same way full bottles do.",
+                  style="Muted.TLabel", wraplength=dpi_px(400),
+                  justify="left").pack(anchor="w", padx=(36, 8), pady=(0, 6))
+
+        self.include_past_owned_var = tk.BooleanVar(value=self.app.app_data.include_past_owned)
+        ttk.Checkbutton(owned_frame, text="Also count perfumes you used to own",
+                        variable=self.include_past_owned_var,
+                        style="TCheckbutton").pack(anchor="w", padx=12, pady=(0, 0))
+        ttk.Label(owned_frame,
+                  text="When on, perfumes whose current ml has dropped to 0 still match "
+                       "the Owned filter as long as you previously logged a positive ml "
+                       "purchase. Their state line shows \"Past-owned\".",
+                  style="Muted.TLabel", wraplength=dpi_px(400),
+                  justify="left").pack(anchor="w", padx=(36, 8), pady=(0, 4))
         
         # === Section: Fragrantica Import ===
         import_frame = ttk.LabelFrame(main, text=" Fragrantica Import ", style="TLabelframe")
@@ -4705,10 +4777,8 @@ class SettingsDialog(tk.Toplevel):
     def _on_save(self):
         """Save settings and close"""
         self.app.app_data.font_size = self.app.font_size
-        self.app.app_data.owned_ml_include_formats = [name for name, var in self.owned_ml_format_vars.items() if var.get()]
-        if not self.app.app_data.owned_ml_include_formats:
-            names = self.app.get_all_purchase_type_names()
-            self.app.app_data.owned_ml_include_formats = [names[0]] if names else ["full"]
+        self.app.app_data.include_decant = bool(self.include_decant_var.get())
+        self.app.app_data.include_past_owned = bool(self.include_past_owned_var.get())
         new_insert_pos = self.insert_pos_var.get()
         if new_insert_pos in ("below_selected", "append", "sort_view"):
             self.app.app_data.sort_active_insert_position = new_insert_pos
@@ -4731,8 +4801,11 @@ class SettingsDialog(tk.Toplevel):
         if self.app.font_size != self.original_font_size:
             self.app.font_size = self.original_font_size
             self.app._apply_font_size()
-        if self.app.app_data.owned_ml_include_formats != self.original_owned_ml_formats:
-            self.app.app_data.owned_ml_include_formats = list(self.original_owned_ml_formats)
+        # Owned-matching toggles are applied only on Save, so reverting here is
+        # just a defensive reset in case future code starts live-previewing
+        # them.  Cheap to keep in sync.
+        self.app.app_data.include_decant = self.original_include_decant
+        self.app.app_data.include_past_owned = self.original_include_past_owned
         self.destroy()
 
 
@@ -5745,7 +5818,11 @@ class App(tk.Tk):
         for p in sorted_perfumes:
             # V2: Pass tag_names to derive_state
             tag_names = [self.get_tag_name(tid) for tid in p.tag_ids]
-            state, _ = derive_state(p, tag_names, self.app_data.owned_ml_include_formats)
+            state, _ = derive_state(
+                p, tag_names,
+                self.app_data.include_decant,
+                self.app_data.include_past_owned,
+            )
             brand_display = self.get_brand_name(p.brand_id)
             
             # Get concentration name
@@ -5798,9 +5875,13 @@ class App(tk.Tk):
         if config.states:
             # V2: Pass tag_names to derive_state
             tag_names = [self.get_tag_name(tid) for tid in p.tag_ids]
-            state, owned_ml = derive_state(p, tag_names, self.app_data.owned_ml_include_formats)
+            state, owned_match = derive_state(
+                p, tag_names,
+                self.app_data.include_decant,
+                self.app_data.include_past_owned,
+            )
             matches_state = False
-            if "owned" in config.states and owned_ml > 0:
+            if "owned" in config.states and owned_match:
                 matches_state = True
             if "tested" in config.states and "Smelled" in state:
                 matches_state = True
@@ -6077,7 +6158,11 @@ class App(tk.Tk):
         elif dimension == "state":
             # V2: Pass tag_names to derive_state
             tag_names = [self.get_tag_name(tid) for tid in p.tag_ids]
-            state, owned_ml = derive_state(p, tag_names, self.app_data.owned_ml_include_formats)
+            state, _ = derive_state(
+                p, tag_names,
+                self.app_data.include_decant,
+                self.app_data.include_past_owned,
+            )
             state_priority = {"Owned": 0, "Smelled": 1, "Wishlist": 2}
             if order == "owned_first":
                 return (state_priority.get(state.split(",")[0], 3),)
@@ -6119,7 +6204,11 @@ class App(tk.Tk):
         
         # Line 3: State (derived from events)
         tag_names_for_state = [self.get_tag_name(tid) for tid in p.tag_ids]
-        state, _ = derive_state(p, tag_names_for_state, self.app_data.owned_ml_include_formats)
+        state, _ = derive_state(
+            p, tag_names_for_state,
+            self.app_data.include_decant,
+            self.app_data.include_past_owned,
+        )
         state_text = state if state else "New"
         self.state_label.config(text=state_text)
         

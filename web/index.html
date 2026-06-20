@@ -426,11 +426,16 @@
                         </div>
                     </div>
                     <div class="filter-group">
-                        <label>Owned ml Formats</label>
-                        <div class="checkbox-group" id="settings-owned-formats">
-                            <!-- Populated by JS -->
-                        </div>
-                        <p class="hint">Only checked formats count toward Owned ml</p>
+                        <label>Owned Matching</label>
+                        <p class="hint">Full bottles always count toward Owned. Use the toggles below to broaden the definition.</p>
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="settings-include-decant"> Also count decants
+                        </label>
+                        <p class="hint" style="margin-left: 1.5em;">When on, decant purchases (positive ml) contribute to Owned the same way full bottles do.</p>
+                        <label class="checkbox-item">
+                            <input type="checkbox" id="settings-include-past-owned"> Also count perfumes you used to own
+                        </label>
+                        <p class="hint" style="margin-left: 1.5em;">When on, perfumes whose current ml has dropped to 0 still match Owned as long as you previously logged a positive ml purchase. Their state shows "Past-owned".</p>
                     </div>
                     <div class="filter-group">
                         <label>Vote Source for Sort & Filter</label>
