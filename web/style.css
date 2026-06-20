@@ -696,9 +696,27 @@ body {
     color: var(--vote-line);
 }
 
+/* Right-side fixed columns in the title row.  Without these, every block's
+   spectrum / strip right edge depends on the rendered widths of the
+   summary widget (MiniSpectrum is wider than WhenToWearStrip due to its
+   1/5 endpoint labels) and the variable-length sample text -- the rows
+   end up unaligned across blocks.  Two fixed widths plus right alignment
+   inside each give a clean visual column.  Mirrors the desktop layout. */
+.vote-summary-slot {
+    display: inline-flex;
+    justify-content: flex-end;
+    align-items: center;
+    width: 9.5em;
+}
+
 .block-sample {
     font-size: 0.75rem;
     color: var(--text-muted);
+    width: 4.5em;
+    text-align: right;
+    /* Equal-width digits where the rendered font supports it; harmless
+       fallback (proportional digits) on fonts that don't. */
+    font-variant-numeric: tabular-nums;
 }
 
 .vote-block-toggle {

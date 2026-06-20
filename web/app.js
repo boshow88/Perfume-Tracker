@@ -922,12 +922,16 @@ function renderFragrantica(p) {
             `;
         }).join('');
         
+        // Wrap the spectrum/strip in a fixed-width slot so the right edges
+        // line up across rows regardless of which summary widget the block
+        // uses (MiniSpectrum has 1/5 endpoint labels, WhenToWearStrip does
+        // not -- their natural widths differ).  Mirrors the desktop layout.
         blocks.push(`
             <div class="vote-block" data-category="${block.key}">
                 <div class="vote-block-header">
                     <span class="vote-block-title">${block.label}</span>
                     <span class="vote-block-info">
-                        ${scoreDisplay}
+                        <span class="vote-summary-slot">${scoreDisplay}</span>
                         <span class="block-sample">(n=${sampleSize})</span>
                     </span>
                     <span class="vote-block-toggle">+</span>

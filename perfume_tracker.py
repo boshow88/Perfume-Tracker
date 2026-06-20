@@ -1825,26 +1825,57 @@ class CollapsibleVoteBlock(ttk.Frame):
         # The spectrum/strip + sample are right-aligned via side="right".
         # Packing order is reversed because side="right" packs right-to-left:
         # sample first (innermost-right), then spectrum (to its left).
-        # The textual numbers for either side are deferred to a hover tooltip
-        # on the widget so the row stays terse and uniformly aligned across
-        # all blocks.
+        #
+        # Both right-side cells live inside fixed-width containers
+        # (pack_propagate(False)) so their outer widths do not depend on
+        # content.  Without this:
+        #   - sample text varies between e.g. "(No data)", "(⚠ 28 votes)" and
+        #     "(8421 votes)"; proportional digit widths shift the spectrum's
+        #     right edge by several pixels per row.
+        #   - MiniSpectrum and WhenToWearStrip have different natural widths
+        #     (the spectrum carries 1/5 endpoint labels that the strip does
+        #     not), so even with sample fixed the two summary widgets would
+        #     not line up across rows.
+        # Fixing both columns means every row's spectrum/strip right edge
+        # sits at the same X coordinate -- which is what makes the at-a-glance
+        # column actually scannable.
         label_kwargs = dict(bg=COLORS["panel"], cursor="hand2")
         self.title_label = tk.Label(self.title_frame, text=f"{title}: ",
                                     anchor="w", fg=COLORS["text"], **label_kwargs)
         self.title_label.pack(side="left")
         self.title_label.bind("<Button-1>", self._on_title_click)
 
-        # Sample size: rightmost
-        self.sample_label = tk.Label(self.title_frame, text="(No data)",
-                                     fg=COLORS["text"], **label_kwargs)
-        self.sample_label.pack(side="right")
+        # Compute the right-side column widths up front so we can size both
+        # the sample box and the summary box.  Recomputed on font changes.
+        self._sample_box_w, self._summary_box_w, self._right_box_h = \
+            self._compute_right_slot_dims()
+
+        # Sample size: rightmost, wrapped in a fixed-width box.
+        self.sample_box = tk.Frame(self.title_frame, bg=COLORS["panel"],
+                                   width=self._sample_box_w,
+                                   height=self._right_box_h)
+        self.sample_box.pack(side="right")
+        self.sample_box.pack_propagate(False)
+        self.sample_box.bind("<Button-1>", self._on_title_click)
+
+        self.sample_label = tk.Label(self.sample_box, text="(No data)",
+                                     anchor="e", fg=COLORS["text"], **label_kwargs)
+        self.sample_label.pack(fill="both", expand=True)
         self.sample_label.bind("<Button-1>", self._on_title_click)
 
         # Per-block summary widget. When-to-Wear is categorical (6 slots),
         # everything else is a 1D spectrum with optional endpoint labels.
-        # Packed with side="right" so it sits just left of the sample label.
-        self.summary_widget = self._build_summary_widget()
-        self.summary_widget.pack(side="right", padx=(6, 2))
+        # Packed with side="right" so it sits just left of the sample box,
+        # inside its own fixed-width container so its right edge is column-
+        # aligned across all blocks regardless of which summary widget type
+        # this block is using.
+        self.summary_box = tk.Frame(self.title_frame, bg=COLORS["panel"],
+                                    width=self._summary_box_w,
+                                    height=self._right_box_h)
+        self.summary_box.pack(side="right", padx=(6, 2))
+        self.summary_box.pack_propagate(False)
+        self.summary_widget = self._build_summary_widget(self.summary_box)
+        self.summary_widget.pack(side="right")
         self.summary_widget.bind_click(self._on_title_click_no_arg)
 
         # Content frame (shown when expanded)
@@ -1858,7 +1889,7 @@ class CollapsibleVoteBlock(ttk.Frame):
         """Adapter for the summary widgets' bind_click (no event arg)."""
         self._on_title_click(None)
 
-    def _build_summary_widget(self):
+    def _build_summary_widget(self, parent):
         """Pick the right at-a-glance widget for this block.
 
         - season_time_votes -> 6-slot categorical strip
@@ -1866,7 +1897,7 @@ class CollapsibleVoteBlock(ttk.Frame):
         - others (rating/longevity/sillage/value) -> spectrum with 1..N endpoints
         """
         if self.block_name == "season_time_votes":
-            return WhenToWearStrip(self.title_frame, font_size=self.font_size)
+            return WhenToWearStrip(parent, font_size=self.font_size)
         # All numeric blocks now share the same convention:
         #   keys[0] = top of expanded list = highest score = right of spectrum.
         # Gender was the historical odd one out; its score encoding has been
@@ -1876,11 +1907,46 @@ class CollapsibleVoteBlock(ttk.Frame):
             left_label, right_label = "♀", "♂"
         else:
             left_label, right_label = "1", str(int(score_max))
-        return MiniSpectrum(self.title_frame,
+        return MiniSpectrum(parent,
                             left_label=left_label, right_label=right_label,
                             score_range=(1.0, score_max),
                             reverse=False,
                             font_size=self.font_size)
+
+    # Sample-text template used to size the right-most fixed column.  Any
+    # plausible sample stays within (⚠ + 4-digit count + " votes" suffix);
+    # using a literal worst case keeps the column wide enough so spectrum
+    # right edges are stable across rows.
+    _SAMPLE_TEMPLATE = "(⚠ 9999 votes)"
+
+    def _compute_right_slot_dims(self):
+        """Pixel widths for the two fixed right-side columns.
+
+        Recomputed whenever the font size changes so the columns track the
+        active font.  Returns (sample_box_w, summary_box_w, row_h).
+        """
+        # Use the actual font assigned to title-row labels so widths track
+        # the global font/DPI configuration done in App._apply_font_size.
+        f = tkfont.Font(font=self.title_label.cget("font"))
+        sample_w = f.measure(self._SAMPLE_TEMPLATE) + dpi_px(6)
+
+        # MiniSpectrum: line + 2 endpoint labels (each width=2 chars in
+        # Tk Label, which uses ~2 * font.measure("0") in pixels) + their
+        # explicit padx and a tiny safety margin.
+        char_w = f.measure("0")
+        spectrum_w = (
+            scale_px(MiniSpectrum.BASE_LINE_W, self.font_size)
+            + 2 * (2 * char_w)        # left + right endpoint labels
+            + dpi_px(8)               # padx (2 + 2 on inner sides) + margin
+        )
+        strip_w = (
+            scale_px(WhenToWearStrip.BASE_SLOT_W, self.font_size)
+            * len(WhenToWearStrip.KEYS)
+        )
+        summary_w = max(spectrum_w, strip_w)
+
+        row_h = f.metrics("linespace") + dpi_px(4)
+        return sample_w, summary_w, row_h
 
     def _on_resize(self, event):
         """Re-render bars when width changes significantly"""
@@ -2035,11 +2101,19 @@ class CollapsibleVoteBlock(ttk.Frame):
 
         Named Tk fonts handle Label/Button rescaling automatically, but our
         Canvas-drawn elements (MiniSpectrum + the vote bars) hold pixel
-        dimensions that must be recomputed here.
+        dimensions that must be recomputed here.  The right-side fixed-width
+        columns are also re-measured so they continue to track the new font.
         """
         self.font_size = font_size
         if hasattr(self.summary_widget, "update_font_size"):
             self.summary_widget.update_font_size(font_size)
+        # Re-measure the right-side columns and resize their containers.
+        self._sample_box_w, self._summary_box_w, self._right_box_h = \
+            self._compute_right_slot_dims()
+        self.sample_box.config(width=self._sample_box_w,
+                               height=self._right_box_h)
+        self.summary_box.config(width=self._summary_box_w,
+                                height=self._right_box_h)
         if self.expanded:
             self._render_bars()
 
