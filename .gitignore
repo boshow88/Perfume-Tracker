@@ -5,3 +5,7 @@ __pycache__/
 
 # Editor / agent tooling
 .todo
+
+# Mobile-import working files: raw handwritten notes + generated draft
+# bundles.  Local workflow only, not part of the app.
+import-workspace/

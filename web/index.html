@@ -23,6 +23,11 @@
                     <span class="icon">⏚</span>
                     <span class="label">Filter</span>
                 </button>
+                <button id="drafts-btn" class="btn btn-action" title="On-the-go drafts">
+                    <span class="icon">📱</span>
+                    <span class="label">Drafts</span>
+                    <span id="drafts-badge" class="drafts-badge hidden">0</span>
+                </button>
                 <button id="settings-btn" class="btn btn-action">
                     <span class="icon">⚙</span>
                     <span class="label">Settings</span>
@@ -68,6 +73,10 @@
                     <h2 id="detail-brand" class="detail-brand"></h2>
                     <h3 id="detail-name-conc" class="detail-name-conc"></h3>
                     <p id="detail-state" class="detail-state"></p>
+                    <div class="detail-actions">
+                        <button id="detail-add-event" class="btn btn-secondary btn-small" type="button">+ Event</button>
+                        <button id="detail-edit-perfume" class="btn btn-secondary btn-small" type="button">✎ Edit</button>
+                    </div>
                 </div>
 
                 <!-- Fragrantica Section -->
@@ -462,6 +471,172 @@
                 <div class="modal-footer">
                     <button id="settings-reset" class="btn btn-secondary">Reset</button>
                     <button id="settings-apply" class="btn btn-primary">Apply</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================
+             Drafts Modal — inbox of on-the-go entries
+             (See Mobile Data Entry section in app.js)
+             ============================================ -->
+        <div id="drafts-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Drafts</h3>
+                    <button class="btn-close modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p class="hint">
+                        Drafts live only on this device (localStorage). Use Export
+                        to move them into your desktop app for review and import.
+                    </p>
+                    <div class="drafts-toolbar">
+                        <button id="drafts-add-perfume" class="btn btn-primary" type="button">
+                            + New Perfume
+                        </button>
+                    </div>
+                    <div id="drafts-list" class="drafts-list">
+                        <p class="drafts-empty">No drafts yet.</p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button id="drafts-clear-all" class="btn btn-danger" type="button">Clear All</button>
+                    <button id="drafts-export" class="btn btn-primary" type="button">Export…</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================
+             New Event Modal
+             ============================================ -->
+        <div id="event-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content modal-small">
+                <div class="modal-header">
+                    <h3 id="event-modal-title">Log Event</h3>
+                    <button class="btn-close modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p id="event-modal-target" class="event-target"></p>
+                    <div class="filter-group">
+                        <label>Type</label>
+                        <div class="event-type-buttons" id="event-type-buttons">
+                            <button class="chip-btn" data-type="smell" type="button">Smell</button>
+                            <button class="chip-btn" data-type="skin" type="button">Skin</button>
+                        </div>
+                    </div>
+                    <div class="filter-group">
+                        <label for="event-date">Date</label>
+                        <input type="date" id="event-date">
+                        <p class="hint">Leave blank to use today.</p>
+                    </div>
+                    <div class="filter-group">
+                        <label for="event-location">Location</label>
+                        <input type="text" id="event-location" list="event-location-options" placeholder="Store or outlet">
+                        <datalist id="event-location-options"></datalist>
+                        <p class="hint">Pick an existing outlet or type a new one.</p>
+                    </div>
+                    <div class="filter-group">
+                        <label for="event-note">Note</label>
+                        <textarea id="event-note" rows="3" placeholder="Optional"></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-close" type="button">Cancel</button>
+                    <button id="event-save" class="btn btn-primary" type="button">Save Draft</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================
+             Perfume Form Modal — shared by new_perfume
+             and edit_perfume (mode toggled from JS)
+             ============================================ -->
+        <div id="perfume-form-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="pform-title">New Perfume</h3>
+                    <button class="btn-close modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p id="pform-mode-hint" class="hint"></p>
+
+                    <div class="filter-group">
+                        <label for="pform-name">Name *</label>
+                        <input type="text" id="pform-name" placeholder="Perfume name">
+                    </div>
+                    <div class="filter-group">
+                        <label for="pform-brand">Brand *</label>
+                        <input type="text" id="pform-brand" list="pform-brand-options" placeholder="Type or pick existing">
+                        <datalist id="pform-brand-options"></datalist>
+                    </div>
+                    <div class="filter-group form-row">
+                        <div class="form-col">
+                            <label for="pform-concentration">Concentration</label>
+                            <input type="text" id="pform-concentration" list="pform-concentration-options">
+                            <datalist id="pform-concentration-options"></datalist>
+                        </div>
+                        <div class="form-col">
+                            <label for="pform-year">Year</label>
+                            <input type="number" id="pform-year" min="1800" max="2100" step="1" placeholder="—">
+                        </div>
+                    </div>
+                    <div class="filter-group">
+                        <label>Tags</label>
+                        <div id="pform-tags-chips" class="chips-input" data-source="tags"></div>
+                    </div>
+                    <div class="filter-group">
+                        <label>Locations</label>
+                        <div id="pform-outlets-chips" class="chips-input" data-source="outlets"></div>
+                    </div>
+                    <div class="filter-group">
+                        <label id="pform-note-label">Note (optional)</label>
+                        <p id="pform-note-hint" class="hint"></p>
+                        <input type="text" id="pform-note-title" placeholder="Title (default: My Notes)">
+                        <textarea id="pform-note-content" rows="3" placeholder="Freeform note"></textarea>
+                    </div>
+
+                    <details class="form-collapsible">
+                        <summary>My Votes (optional)</summary>
+                        <div id="pform-my-votes" class="compact-votes"></div>
+                    </details>
+
+                    <details id="pform-initial-events-wrap" class="form-collapsible">
+                        <summary>Initial Events <span id="pform-events-count" class="hint-inline">(0)</span></summary>
+                        <div id="pform-initial-events" class="initial-events-list"></div>
+                        <button id="pform-add-event" class="btn btn-secondary btn-small" type="button">+ Add Event</button>
+                    </details>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary modal-close" type="button">Cancel</button>
+                    <button id="pform-save" class="btn btn-primary" type="button">Save Draft</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================
+             Export Modal
+             ============================================ -->
+        <div id="export-modal" class="modal hidden">
+            <div class="modal-backdrop"></div>
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3>Export Drafts</h3>
+                    <button class="btn-close modal-close">✕</button>
+                </div>
+                <div class="modal-body">
+                    <p class="hint">
+                        Copy this JSON or download it, then open the desktop app's
+                        <strong>Import</strong> button and paste / load it there.
+                    </p>
+                    <textarea id="export-textarea" rows="14" readonly></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button id="export-copy" class="btn btn-secondary" type="button">Copy</button>
+                    <button id="export-download" class="btn btn-primary" type="button">Download</button>
+                    <button class="btn btn-secondary modal-close" type="button">Close</button>
                 </div>
             </div>
         </div>

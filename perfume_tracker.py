@@ -14,6 +14,7 @@ Files:
 
 from __future__ import annotations
 
+import difflib
 import json
 import math
 import os
@@ -22,7 +23,7 @@ import time
 import uuid
 from datetime import datetime
 from dataclasses import dataclass, asdict, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 # Enable High-DPI awareness on Windows BEFORE the first Tk root is created
 # so tkinter reports physical pixel coordinates instead of letting Windows
@@ -54,6 +55,41 @@ DATA_DIR = os.path.join(os.path.dirname(__file__), "data")
 DB_PATH = os.path.join(DATA_DIR, "perfumes.json")
 
 LOW_SAMPLE_THRESHOLD = 30  # configurable at code level
+
+# -----------------------------
+# Mobile draft bundle schema
+# -----------------------------
+# The web version can accumulate drafts on the user's phone (Layer 1: new
+# events on existing perfumes; Layer 2: brand-new perfumes; Layer 3: edits
+# to existing perfumes) and export them as a JSON bundle for the desktop
+# to import.  This schema is the contract between web/app.js and the
+# desktop MobileImportDialog below.
+#
+# Wire format:
+#   {
+#     "version": 1,
+#     "generated_at": <iso-8601 string>,
+#     "generator": "perfume-tracker-web/<ver>",
+#     "drafts": [ { "kind": <one of MOBILE_DRAFT_KINDS>, ...fields }, ... ]
+#   }
+#
+# Every draft carries a temp_id (unique within the bundle) and a
+# created_at timestamp.  See parse_mobile_bundle() for validation and the
+# per-kind field expectations.
+#
+# For every *_id field the draft may also carry a *_name_snapshot -- this
+# is the display name the mobile saw when the draft was created.  Its
+# purpose is graceful degradation when the referenced id no longer exists
+# on the desktop (renamed, deleted, or merged since the draft was
+# created).  Import always trusts the current id map first and only falls
+# back to name snapshots for resolution / display.
+MOBILE_BUNDLE_VERSION = 1
+MOBILE_DRAFT_KINDS = ("new_perfume", "new_event", "edit_perfume")
+
+# Fuzzy-match threshold: below this, we do not offer a suggested match
+# because the user probably meant something new.  Tuned empirically for
+# perfume/brand names which are usually 5-20 chars.
+FUZZY_MATCH_SUGGEST_MIN = 0.6
 
 COLORS = {
     "bg": "#111111",
@@ -902,6 +938,126 @@ def derive_state(p: Perfume, tag_names: List[str] = None,
         return ("New", owned_match)
 
     return (" | ".join(parts), owned_match)
+
+
+# -----------------------------
+# Mobile draft bundle helpers
+# -----------------------------
+def _validate_draft(draft: Any, idx: int, errors: List[str]) -> bool:
+    """Validate a single draft dict.  Appends human-readable messages to
+    `errors` (prefixed with the draft index) and returns True iff the draft
+    is structurally usable (i.e. no error would prevent the dialog from
+    showing it).  Downstream code should still guard against missing
+    optional fields."""
+    prefix = f"draft #{idx + 1}"
+    if not isinstance(draft, dict):
+        errors.append(f"{prefix}: not a JSON object")
+        return False
+    kind = draft.get("kind")
+    if kind not in MOBILE_DRAFT_KINDS:
+        errors.append(f"{prefix}: unknown kind {kind!r} "
+                      f"(expected one of {MOBILE_DRAFT_KINDS})")
+        return False
+    # Kind-specific structural checks -- just enough that the dialog does
+    # not crash when it renders the draft.  Semantic issues (dead perfume
+    # ids, brand fuzzy-match failures, etc.) are handled per-draft in the
+    # UI so the user can see and resolve them there.
+    if kind == "new_perfume":
+        data = draft.get("data")
+        if not isinstance(data, dict):
+            errors.append(f"{prefix}: new_perfume missing 'data' object")
+            return False
+    elif kind == "new_event":
+        if not isinstance(draft.get("perfume_id"), str) or not draft["perfume_id"]:
+            errors.append(f"{prefix}: new_event missing 'perfume_id'")
+            return False
+        if not isinstance(draft.get("event"), dict):
+            errors.append(f"{prefix}: new_event missing 'event' object")
+            return False
+    elif kind == "edit_perfume":
+        if not isinstance(draft.get("perfume_id"), str) or not draft["perfume_id"]:
+            errors.append(f"{prefix}: edit_perfume missing 'perfume_id'")
+            return False
+        if not isinstance(draft.get("modified_fields"), dict):
+            errors.append(f"{prefix}: edit_perfume missing 'modified_fields' object")
+            return False
+    return True
+
+
+def parse_mobile_bundle(raw: Any) -> Tuple[Optional[Dict], List[str]]:
+    """Parse and shallow-validate a mobile draft bundle.
+
+    Accepts either a JSON string or an already-decoded dict.  Returns
+    (bundle_dict, errors).  On unrecoverable failure (bad JSON, wrong
+    top-level shape, unsupported version) returns (None, errors).  On
+    partial failure (some drafts invalid) returns the bundle with only
+    the valid drafts kept -- the caller can then decide whether to warn
+    the user, but the dialog remains usable for the good ones.
+    """
+    errors: List[str] = []
+    if isinstance(raw, str):
+        try:
+            bundle = json.loads(raw)
+        except json.JSONDecodeError as e:
+            errors.append(f"Invalid JSON: {e.msg} (line {e.lineno}, col {e.colno})")
+            return None, errors
+    elif isinstance(raw, dict):
+        bundle = raw
+    else:
+        errors.append(f"Expected str or dict, got {type(raw).__name__}")
+        return None, errors
+
+    if not isinstance(bundle, dict):
+        errors.append("Top-level value is not a JSON object")
+        return None, errors
+
+    version = bundle.get("version")
+    if version != MOBILE_BUNDLE_VERSION:
+        errors.append(
+            f"Unsupported bundle version {version!r} "
+            f"(this build reads version {MOBILE_BUNDLE_VERSION}). "
+            f"Update either the mobile web or this desktop app to match."
+        )
+        return None, errors
+
+    drafts = bundle.get("drafts")
+    if not isinstance(drafts, list):
+        errors.append("Missing or non-list 'drafts' field")
+        return None, errors
+
+    # Keep only the well-formed drafts; collect messages for the rest so
+    # the dialog can surface them.  A completely empty bundle after
+    # filtering is still returned (the dialog will show "no drafts").
+    good_drafts = [d for i, d in enumerate(drafts) if _validate_draft(d, i, errors)]
+    return {**bundle, "drafts": good_drafts}, errors
+
+
+def fuzzy_match_names(query: str, candidates: List[str],
+                      limit: int = 5,
+                      min_ratio: float = FUZZY_MATCH_SUGGEST_MIN
+                      ) -> List[Tuple[str, float]]:
+    """Return the top `limit` candidates ranked by similarity to `query`,
+    filtered to ratios >= `min_ratio`.  Case-insensitive.  Empty query or
+    empty candidates return [].
+
+    Uses difflib.SequenceMatcher (Ratcliff/Obershelp).  It is not the
+    fastest fuzzy matcher, but the id maps are tiny (dozens to low
+    hundreds of names) so the O(n) comparison is fine and we avoid
+    pulling a third-party dependency.
+    """
+    q = (query or "").strip().lower()
+    if not q or not candidates:
+        return []
+    scored: List[Tuple[str, float]] = []
+    for cand in candidates:
+        c = (cand or "").strip()
+        if not c:
+            continue
+        ratio = difflib.SequenceMatcher(None, q, c.lower()).ratio()
+        if ratio >= min_ratio:
+            scored.append((c, ratio))
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:limit]
 
 
 # -----------------------------
@@ -4884,6 +5040,1293 @@ class SettingsDialog(tk.Toplevel):
 
 
 # -----------------------------
+# Mobile Import Dialog
+# -----------------------------
+class MobileImportDialog(tk.Toplevel):
+    """Review + apply a JSON bundle of drafts produced by the web app.
+
+    Design goals:
+      - never write to app_data until the user hits Approve on a draft
+      - surface stale ID references, fuzzy-matched name candidates, and
+        per-field conflicts for edits so the user makes the final call
+      - keep the three kinds (new_event / new_perfume / edit_perfume)
+        in a single dialog to keep the mental model small
+
+    Layout:
+      Top    - "Source" area (paste JSON or load .json file) + Parse button
+      Middle - Left: draft list with checkboxes.  Right: detail form for
+               the currently focused draft (kind-specific).
+      Bottom - Cancel + Approve Selected buttons.
+    """
+
+    def __init__(self, app: "App"):
+        super().__init__(app)
+        self.app = app
+        self.title("Import from Mobile")
+        self.configure(bg=COLORS["bg"])
+        self.transient(app)
+        self.grab_set()
+        self.geometry(f"{dpi_px(900)}x{dpi_px(640)}")
+        self.minsize(dpi_px(720), dpi_px(480))
+
+        # Parsed bundle state.  `drafts` is a list of dicts (post-validation).
+        # `resolutions` is keyed by temp_id and stores per-draft UI state:
+        #   {
+        #     "approved": tk.BooleanVar,
+        #     ... kind-specific keys (see _init_resolution_for)
+        #   }
+        self.bundle: Optional[Dict] = None
+        self.drafts: List[Dict] = []
+        self.resolutions: Dict[str, Dict[str, Any]] = {}
+        self.selected_temp_id: Optional[str] = None
+
+        # Widgets that need to be reachable across methods
+        self.paste_text: Optional[tk.Text] = None
+        self.status_label: Optional[ttk.Label] = None
+        self.list_frame: Optional[ttk.Frame] = None
+        self.detail_frame: Optional[ttk.Frame] = None
+        self.approve_button: Optional[ttk.Button] = None
+
+        self._build_ui()
+
+    # ---------- UI construction ----------
+
+    def _build_ui(self):
+        outer = ttk.Frame(self, style="TFrame")
+        outer.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # === Source area ===
+        source_frame = ttk.LabelFrame(outer, text=" Source ", style="TLabelframe")
+        source_frame.pack(fill="x", pady=(0, 8), ipadx=8, ipady=6)
+
+        row = ttk.Frame(source_frame, style="TFrame")
+        row.pack(fill="x", padx=6, pady=(6, 4))
+        ttk.Button(row, text="Paste from clipboard",
+                   command=self._paste_from_clipboard).pack(side="left")
+        ttk.Button(row, text="Load file...",
+                   command=self._on_load_file).pack(side="left", padx=(6, 0))
+        ttk.Button(row, text="Parse",
+                   command=self._on_parse).pack(side="left", padx=(12, 0))
+        ttk.Button(row, text="Clear",
+                   command=self._clear_source).pack(side="left", padx=(6, 0))
+
+        self.paste_text = tk.Text(
+            source_frame, height=6, width=1,
+            bg=COLORS["panel"], fg=COLORS["text"],
+            insertbackground=COLORS["text"],
+            relief="flat", borderwidth=1,
+        )
+        self.paste_text.pack(fill="x", padx=6, pady=(4, 6))
+
+        self.status_label = ttk.Label(
+            source_frame, text="Paste JSON or Load file, then Parse.",
+            style="Muted.TLabel", wraplength=dpi_px(820), justify="left",
+        )
+        self.status_label.pack(anchor="w", padx=6, pady=(0, 4))
+
+        # === Review area ===
+        review_frame = ttk.Frame(outer, style="TFrame")
+        review_frame.pack(fill="both", expand=True)
+
+        # Left: list of drafts.  We put it in a fixed-width column so the
+        # detail pane on the right gets predictable width.
+        left_wrap = ttk.LabelFrame(review_frame, text=" Drafts ",
+                                   style="TLabelframe")
+        left_wrap.pack(side="left", fill="y", padx=(0, 8), ipadx=6, ipady=4)
+
+        # Header row: select-all + counts (populated after parse)
+        sel_row = ttk.Frame(left_wrap, style="TFrame")
+        sel_row.pack(fill="x", pady=(2, 4))
+        ttk.Button(sel_row, text="All",
+                   command=lambda: self._set_all_selected(True),
+                   width=4).pack(side="left", padx=(2, 2))
+        ttk.Button(sel_row, text="None",
+                   command=lambda: self._set_all_selected(False),
+                   width=4).pack(side="left")
+
+        # Scrollable list of draft rows.  Fixed pixel width so the layout
+        # is stable regardless of how long the draft names get.
+        canvas = tk.Canvas(left_wrap, width=dpi_px(280),
+                           bg=COLORS["panel"], highlightthickness=0)
+        canvas.pack(side="left", fill="y")
+        scrollbar = ttk.Scrollbar(left_wrap, orient="vertical",
+                                  command=canvas.yview)
+        scrollbar.pack(side="left", fill="y")
+        canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.list_frame = ttk.Frame(canvas, style="TFrame")
+        self._list_window = canvas.create_window((0, 0), window=self.list_frame,
+                                                  anchor="nw")
+        self._list_canvas = canvas
+        self.list_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all")),
+        )
+        canvas.bind(
+            "<Configure>",
+            lambda e: canvas.itemconfig(self._list_window, width=e.width),
+        )
+
+        # Right: detail pane
+        self.detail_frame = ttk.LabelFrame(review_frame, text=" Detail ",
+                                           style="TLabelframe")
+        self.detail_frame.pack(side="left", fill="both", expand=True,
+                               ipadx=8, ipady=6)
+        self._render_detail_placeholder("Load a bundle to see drafts here.")
+
+        # === Bottom buttons ===
+        btn_row = ttk.Frame(outer, style="TFrame")
+        btn_row.pack(fill="x", pady=(8, 0))
+        ttk.Button(btn_row, text="Cancel", command=self.destroy).pack(side="right")
+        self.approve_button = ttk.Button(
+            btn_row, text="Approve Selected",
+            command=self._on_approve_selected, state="disabled",
+        )
+        self.approve_button.pack(side="right", padx=(0, 8))
+
+    # ---------- Source handling ----------
+
+    def _paste_from_clipboard(self):
+        try:
+            text = self.clipboard_get()
+        except tk.TclError:
+            messagebox.showinfo("Clipboard", "Clipboard is empty or not text.",
+                                parent=self)
+            return
+        self.paste_text.delete("1.0", "end")
+        self.paste_text.insert("1.0", text)
+
+    def _on_load_file(self):
+        # Deferred import: filedialog is only needed here.
+        from tkinter import filedialog
+        path = filedialog.askopenfilename(
+            parent=self,
+            title="Load mobile bundle",
+            filetypes=[("JSON bundle", "*.json"), ("All files", "*.*")],
+        )
+        if not path:
+            return
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                data = fh.read()
+        except OSError as e:
+            messagebox.showerror("Load failed", str(e), parent=self)
+            return
+        self.paste_text.delete("1.0", "end")
+        self.paste_text.insert("1.0", data)
+
+    def _clear_source(self):
+        self.paste_text.delete("1.0", "end")
+        self.bundle = None
+        self.drafts = []
+        self.resolutions.clear()
+        self.selected_temp_id = None
+        self._refresh_list()
+        self._render_detail_placeholder("Load a bundle to see drafts here.")
+        self._update_status("Paste JSON or Load file, then Parse.", muted=True)
+        self.approve_button.config(state="disabled")
+
+    def _on_parse(self):
+        raw = self.paste_text.get("1.0", "end").strip()
+        if not raw:
+            self._update_status("Nothing to parse -- paste JSON or load a file.",
+                                muted=True)
+            return
+        bundle, errors = parse_mobile_bundle(raw)
+        if bundle is None:
+            self._update_status("Parse failed:\n  " + "\n  ".join(errors),
+                                muted=False, error=True)
+            return
+        self.bundle = bundle
+        self.drafts = list(bundle.get("drafts", []))
+        # Wire per-draft resolution state.
+        self.resolutions.clear()
+        for d in self.drafts:
+            self.resolutions[d["temp_id"]] = self._init_resolution_for(d)
+        counts = self._count_by_kind()
+        status_lines = [
+            f"Loaded {len(self.drafts)} draft(s): "
+            f"{counts['new_perfume']} new perfume, "
+            f"{counts['new_event']} event, "
+            f"{counts['edit_perfume']} edit."
+        ]
+        if bundle.get("generated_at"):
+            status_lines.append(f"Generated at {bundle['generated_at']}.")
+        if errors:
+            status_lines.append("Some drafts were dropped:")
+            status_lines.extend("  " + e for e in errors)
+        self._update_status("\n".join(status_lines), muted=False,
+                            error=bool(errors))
+        self._refresh_list()
+        if self.drafts:
+            first_id = self.drafts[0]["temp_id"]
+            self._on_select_draft(first_id)
+        else:
+            self._render_detail_placeholder("Bundle parsed but contains no valid drafts.")
+        self.approve_button.config(state="normal" if self.drafts else "disabled")
+
+    def _count_by_kind(self) -> Dict[str, int]:
+        counts = {k: 0 for k in MOBILE_DRAFT_KINDS}
+        for d in self.drafts:
+            counts[d["kind"]] = counts.get(d["kind"], 0) + 1
+        return counts
+
+    def _update_status(self, text: str, muted: bool = True, error: bool = False):
+        style = "Muted.TLabel" if muted and not error else "TLabel"
+        # No dedicated error style exists; we just switch to bright text.
+        self.status_label.config(text=text, style=style)
+
+    # ---------- Per-draft resolution state ----------
+
+    def _init_resolution_for(self, draft: Dict) -> Dict[str, Any]:
+        """Build the mutable resolution state for one draft.
+
+        CRITICAL: all user-editable values are stored here as plain data or
+        persistent tk.Variables -- never as live widget references.  The
+        detail pane is destroyed and rebuilt every time the user selects a
+        different draft, so any widget created during render is dead by the
+        time Approve runs for a non-focused draft.  Earlier versions read
+        the tags/outlets Listbox at Approve time and crashed with
+        "invalid command name ...listbox".  By pre-seeding everything here
+        (at parse time, for every draft including ones never clicked) and
+        having the widgets bind to / mutate these persistent objects, both
+        the crash and "edits lost when revisiting a draft" are avoided."""
+        st: Dict[str, Any] = {
+            "approved": tk.BooleanVar(value=True),  # selected by default
+        }
+        if draft.get("kind") == "new_perfume":
+            data = draft.get("data", {}) or {}
+            st["name_var"] = tk.StringVar(value=data.get("name") or "")
+            st["year_var"] = tk.StringVar(
+                value=str(data.get("year")) if data.get("year") else "")
+            st["brand_var"] = self._init_name_var(
+                "Brand", data.get("brand_id"),
+                data.get("brand_name_snapshot"), data.get("brand_name_new"))
+            st["concentration_var"] = self._init_name_var(
+                "Concentration", data.get("concentration_id"),
+                data.get("concentration_name_snapshot"),
+                data.get("concentration_name_new"))
+            st["tags_names"], st["tags_stale"] = self._init_multi_names(
+                "Tags", data.get("tag_ids", []) or [],
+                data.get("tag_names_snapshot", []) or [],
+                data.get("tag_names_new", []) or [])
+            st["outlets_names"], st["outlets_stale"] = self._init_multi_names(
+                "Locations", data.get("outlet_ids", []) or [],
+                data.get("outlet_names_snapshot", []) or [],
+                data.get("outlet_names_new", []) or [])
+        elif draft.get("kind") == "new_event":
+            # Pre-resolve the target perfume so Approve works even if the
+            # draft's detail pane was never opened.  If the id is stale,
+            # leave it unset -- the detail pane will offer a redirect picker.
+            p_id = draft.get("perfume_id", "")
+            if p_id and any(p.id == p_id for p in self.app.app_data.perfumes):
+                st["target_perfume_id"] = p_id
+        return st
+
+    def _init_name_var(self, label: str, existing_id: Optional[str],
+                       name_snapshot: Optional[str],
+                       name_new: Optional[str]) -> tk.StringVar:
+        """Create a persistent StringVar pre-filled per the draft schema:
+        existing id -> current map name (fall back to snapshot if the id
+        vanished); otherwise the typed-new string."""
+        var = tk.StringVar()
+        if existing_id:
+            current = self._existing_name_by_id(label, existing_id)
+            var.set(current or (name_snapshot or ""))
+        elif name_new:
+            var.set(name_new)
+        return var
+
+    def _init_multi_names(self, label: str, existing_ids: List[str],
+                          names_snapshot: List[str],
+                          names_new: List[str]) -> Tuple[List[str], List[str]]:
+        """Resolve the initial chosen-name list for a multi-value field.
+        Returns (chosen_names, stale_notes)."""
+        chosen: List[str] = []
+        stale_notes: List[str] = []
+        padded = list(names_snapshot) + [""] * len(existing_ids)
+        for eid, snap in zip(existing_ids, padded):
+            current = self._existing_name_by_id(label, eid) if eid else ""
+            if current:
+                chosen.append(current)
+            elif snap:
+                chosen.append(snap)
+                stale_notes.append(
+                    f"'{snap}' referenced a deleted id -- will create anew if approved")
+        for nm in names_new:
+            if nm and nm not in chosen:
+                chosen.append(nm)
+        return chosen, stale_notes
+
+    # ---------- Draft list rendering ----------
+
+    def _refresh_list(self):
+        for w in self.list_frame.winfo_children():
+            w.destroy()
+        if not self.drafts:
+            ttk.Label(self.list_frame,
+                      text="(no drafts loaded)",
+                      style="Muted.TLabel").pack(padx=6, pady=6, anchor="w")
+            return
+        for d in self.drafts:
+            self._build_list_row(d)
+
+    def _build_list_row(self, draft: Dict):
+        tid = draft["temp_id"]
+        row = ttk.Frame(self.list_frame, style="TFrame")
+        row.pack(fill="x", pady=1)
+
+        # Approve checkbox.  Bound to the resolution state so the value
+        # survives switching between rows.
+        cb = ttk.Checkbutton(row, variable=self.resolutions[tid]["approved"],
+                             style="TCheckbutton")
+        cb.pack(side="left")
+
+        summary = self._summarize_draft(draft)
+        selected = (tid == self.selected_temp_id)
+        # Use tk.Label so we can flip bg easily when this row is selected.
+        lbl = tk.Label(
+            row, text=summary, anchor="w", justify="left",
+            bg=COLORS["accent" if selected else "panel"],
+            fg=COLORS["bg"] if selected else COLORS["text"],
+            padx=6, pady=2, cursor="hand2", wraplength=dpi_px(220),
+        )
+        lbl.pack(side="left", fill="x", expand=True)
+        lbl.bind("<Button-1>", lambda e, x=tid: self._on_select_draft(x))
+
+    def _summarize_draft(self, draft: Dict) -> str:
+        kind = draft["kind"]
+        if kind == "new_event":
+            name = draft.get("perfume_name_snapshot") or "(unknown)"
+            brand = draft.get("brand_name_snapshot") or ""
+            head = f"{brand} — {name}" if brand else name
+            evt = draft.get("event", {}) or {}
+            evt_type = evt.get("event_type", "?")
+            evt_date = evt.get("event_date") or "no date"
+            return f"[Event] {head}\n   {evt_type} @ {evt_date}"
+        if kind == "new_perfume":
+            data = draft.get("data", {}) or {}
+            brand = (data.get("brand_name_snapshot")
+                     or data.get("brand_name_new") or "")
+            name = data.get("name") or "(unnamed)"
+            head = f"{brand} — {name}" if brand else name
+            return f"[NEW] {head}"
+        if kind == "edit_perfume":
+            name = draft.get("perfume_name_snapshot") or "(unknown)"
+            brand = draft.get("brand_name_snapshot") or ""
+            head = f"{brand} — {name}" if brand else name
+            n_fields = len(draft.get("modified_fields", {}) or {})
+            return f"[Edit] {head}\n   {n_fields} field(s) modified"
+        return f"[?] Unknown draft kind {kind!r}"
+
+    def _set_all_selected(self, value: bool):
+        for tid in self.resolutions:
+            self.resolutions[tid]["approved"].set(value)
+
+    # ---------- Detail rendering ----------
+
+    def _clear_detail(self):
+        for w in self.detail_frame.winfo_children():
+            w.destroy()
+
+    def _render_detail_placeholder(self, text: str):
+        self._clear_detail()
+        ttk.Label(self.detail_frame, text=text,
+                  style="Muted.TLabel",
+                  wraplength=dpi_px(400), justify="left"
+                  ).pack(padx=10, pady=10, anchor="nw")
+
+    def _on_select_draft(self, temp_id: str):
+        self.selected_temp_id = temp_id
+        # Re-render list so highlight moves
+        self._refresh_list()
+        draft = self._get_draft(temp_id)
+        if draft is None:
+            self._render_detail_placeholder("Draft not found.")
+            return
+        self._render_detail(draft)
+
+    def _get_draft(self, temp_id: str) -> Optional[Dict]:
+        for d in self.drafts:
+            if d.get("temp_id") == temp_id:
+                return d
+        return None
+
+    def _render_detail(self, draft: Dict):
+        self._clear_detail()
+        kind = draft["kind"]
+        # Scrollable inner container so long details work at small heights.
+        canvas = tk.Canvas(self.detail_frame, bg=COLORS["panel"],
+                           highlightthickness=0)
+        canvas.pack(side="left", fill="both", expand=True)
+        scroll = ttk.Scrollbar(self.detail_frame, orient="vertical",
+                               command=canvas.yview)
+        scroll.pack(side="right", fill="y")
+        canvas.configure(yscrollcommand=scroll.set)
+
+        inner = ttk.Frame(canvas, style="TFrame")
+        window_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind("<Configure>",
+                   lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.bind("<Configure>",
+                    lambda e: canvas.itemconfig(window_id, width=e.width))
+
+        if kind == "new_event":
+            self._render_detail_new_event(draft, inner)
+        elif kind == "new_perfume":
+            self._render_detail_new_perfume(draft, inner)
+        elif kind == "edit_perfume":
+            self._render_detail_edit_perfume(draft, inner)
+        else:
+            ttk.Label(inner, text=f"Unsupported kind {kind!r}",
+                      style="Muted.TLabel").pack(padx=10, pady=10)
+
+    # ---- new_event ----
+
+    def _render_detail_new_event(self, draft: Dict, parent: ttk.Frame):
+        tid = draft["temp_id"]
+        st = self.resolutions[tid]
+
+        # Target perfume.  Match on perfume_id first; fall back to name
+        # snapshot if the id is stale.
+        p_id = draft.get("perfume_id", "")
+        perfume = next((p for p in self.app.app_data.perfumes if p.id == p_id),
+                       None)
+
+        header = ttk.Frame(parent, style="TFrame")
+        header.pack(fill="x", padx=8, pady=(8, 4))
+        ttk.Label(header, text="Event on existing perfume",
+                  style="TLabel").pack(anchor="w")
+
+        target_frame = ttk.LabelFrame(parent, text=" Target ", style="TLabelframe")
+        target_frame.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+        if perfume is not None:
+            brand_name = self.app.get_brand_name(perfume.brand_id)
+            ttk.Label(target_frame,
+                      text=f"{brand_name} — {perfume.name}",
+                      style="TLabel").pack(anchor="w", padx=4, pady=(2, 0))
+            ttk.Label(target_frame,
+                      text=f"(matched by id, still exists)",
+                      style="Muted.TLabel").pack(anchor="w", padx=4)
+            st["target_perfume_id"] = perfume.id
+        else:
+            # Stale id.  Offer a picker to redirect the event.
+            snap_name = draft.get("perfume_name_snapshot") or "(unknown)"
+            snap_brand = draft.get("brand_name_snapshot") or ""
+            snap_head = f"{snap_brand} — {snap_name}" if snap_brand else snap_name
+            ttk.Label(target_frame,
+                      text=f"Referenced perfume no longer exists.",
+                      style="TLabel").pack(anchor="w", padx=4, pady=(2, 0))
+            ttk.Label(target_frame,
+                      text=f"Draft snapshot: {snap_head}",
+                      style="Muted.TLabel").pack(anchor="w", padx=4)
+            picker_row = ttk.Frame(target_frame, style="TFrame")
+            picker_row.pack(fill="x", padx=4, pady=(6, 2))
+            ttk.Label(picker_row, text="Redirect to:",
+                      style="TLabel").pack(side="left")
+            # Build "Brand — Name" strings for all existing perfumes.
+            label_to_id: Dict[str, str] = {}
+            for p in self.app.app_data.perfumes:
+                b = self.app.get_brand_name(p.brand_id)
+                lbl = f"{b} — {p.name}" if b else p.name
+                # Disambiguate duplicates by suffixing short id.
+                if lbl in label_to_id:
+                    lbl = f"{lbl}  [{p.id[:6]}]"
+                label_to_id[lbl] = p.id
+            options = sorted(label_to_id.keys())
+            var = st.get("redirect_var") or tk.StringVar(value="(skip)")
+            st["redirect_var"] = var
+            st["redirect_map"] = label_to_id
+            ttk.Combobox(picker_row, textvariable=var,
+                         values=["(skip)"] + options,
+                         width=32, state="readonly"
+                         ).pack(side="left", padx=(4, 0))
+
+        # Event details, read-only preview.
+        evt = draft.get("event", {}) or {}
+        evt_frame = ttk.LabelFrame(parent, text=" Event ", style="TLabelframe")
+        evt_frame.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+        self._kv_row(evt_frame, "Type", evt.get("event_type", "?"))
+        self._kv_row(evt_frame, "Date", evt.get("event_date") or "(today)")
+        outlet_name = evt.get("outlet_name_new") or ""
+        if not outlet_name and evt.get("outlet_id"):
+            outlet_name = self._outlet_display_name(evt["outlet_id"]) or "(unknown outlet)"
+        self._kv_row(evt_frame, "Location", outlet_name or "—")
+        self._kv_row(evt_frame, "Note", evt.get("note") or "—")
+
+    # ---- new_perfume ----
+
+    def _render_detail_new_perfume(self, draft: Dict, parent: ttk.Frame):
+        tid = draft["temp_id"]
+        st = self.resolutions[tid]
+        data = draft.get("data", {}) or {}
+
+        ttk.Label(parent, text="New perfume", style="TLabel"
+                  ).pack(anchor="w", padx=8, pady=(8, 4))
+
+        # Duplicate detection: fuzzy-match brand+name against existing.
+        brand_disp = self._draft_brand_display(data)
+        combined_query = f"{brand_disp} {data.get('name') or ''}".strip()
+        similar = self._find_similar_perfumes(combined_query, limit=3)
+        if similar:
+            dup_frame = ttk.LabelFrame(parent, text=" Similar existing perfumes ",
+                                       style="TLabelframe")
+            dup_frame.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+            ttk.Label(dup_frame,
+                      text="These already exist in your collection. "
+                           "Approve creates a new perfume anyway; you might "
+                           "prefer to skip this draft and Edit the existing one.",
+                      style="Muted.TLabel", wraplength=dpi_px(480),
+                      justify="left").pack(anchor="w", padx=4, pady=(2, 4))
+            for perf, ratio in similar:
+                b = self.app.get_brand_name(perf.brand_id)
+                lbl = f"  • {b} — {perf.name}   ({int(ratio * 100)}% match)"
+                ttk.Label(dup_frame, text=lbl, style="Muted.TLabel"
+                          ).pack(anchor="w", padx=4)
+
+        # Core fields.
+        core = ttk.LabelFrame(parent, text=" Core fields ", style="TLabelframe")
+        core.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+
+        # Name (StringVar pre-created in _init_resolution_for)
+        self._entry_row(core, "Name", st["name_var"])
+
+        # Brand: existing id vs new name
+        st["brand_choice"] = self._build_name_resolver(
+            core, "Brand", st["brand_var"],
+            existing_id=data.get("brand_id"),
+            name_snapshot=data.get("brand_name_snapshot"),
+            name_new=data.get("brand_name_new"),
+            candidates=self.app.get_all_brand_names(),
+        )
+
+        # Concentration
+        st["concentration_choice"] = self._build_name_resolver(
+            core, "Concentration", st["concentration_var"],
+            existing_id=data.get("concentration_id"),
+            name_snapshot=data.get("concentration_name_snapshot"),
+            name_new=data.get("concentration_name_new"),
+            candidates=self.app.get_all_concentration_names(),
+            allow_none=True,
+        )
+
+        # Year (StringVar pre-created in _init_resolution_for)
+        self._entry_row(core, "Year", st["year_var"], width=8)
+
+        # Tags (multi) -- backed by the persistent st["tags_names"] list
+        st["tags_choices"] = self._build_multi_name_resolver(
+            parent, "Tags", st["tags_names"], st.get("tags_stale", []),
+            data.get("tag_names_new", []) or [],
+            candidates=self.app.get_all_tag_names(),
+        )
+
+        # Outlets (multi) -- backed by the persistent st["outlets_names"] list
+        st["outlets_choices"] = self._build_multi_name_resolver(
+            parent, "Locations", st["outlets_names"], st.get("outlets_stale", []),
+            data.get("outlet_names_new", []) or [],
+            candidates=self.app.get_all_outlet_names(),
+        )
+
+        # Events at creation time (read-only preview; they will be created
+        # with the new perfume on Approve).
+        events = data.get("events", []) or []
+        if events:
+            ev_frame = ttk.LabelFrame(parent, text=f" Initial events ({len(events)}) ",
+                                      style="TLabelframe")
+            ev_frame.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+            for evt in events:
+                self._render_event_readonly(ev_frame, evt)
+
+        # my_votes summary (read-only preview; imported wholesale).
+        mv = data.get("my_votes") or {}
+        if any((v or {}) for v in mv.values() if isinstance(v, dict)):
+            mv_frame = ttk.LabelFrame(parent, text=" My Votes (preview) ",
+                                      style="TLabelframe")
+            mv_frame.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+            for k, v in mv.items():
+                if not isinstance(v, dict) or not v:
+                    continue
+                summary = ", ".join(f"{opt}: {cnt}"
+                                    for opt, cnt in v.items() if cnt)
+                if summary:
+                    self._kv_row(mv_frame, k, summary)
+
+        # Notes preview
+        notes = data.get("notes", []) or []
+        if notes:
+            n_frame = ttk.LabelFrame(parent, text=" Notes ", style="TLabelframe")
+            n_frame.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+            for n in notes:
+                title = n.get("title") or "Note"
+                content = n.get("content") or ""
+                ttk.Label(n_frame, text=f"{title}:", style="TLabel"
+                          ).pack(anchor="w", padx=4, pady=(2, 0))
+                ttk.Label(n_frame, text=content, style="Muted.TLabel",
+                          wraplength=dpi_px(480), justify="left"
+                          ).pack(anchor="w", padx=12, pady=(0, 2))
+
+    # ---- edit_perfume ----
+
+    def _render_detail_edit_perfume(self, draft: Dict, parent: ttk.Frame):
+        tid = draft["temp_id"]
+        st = self.resolutions[tid]
+        p_id = draft.get("perfume_id", "")
+        perfume = next((p for p in self.app.app_data.perfumes if p.id == p_id),
+                       None)
+
+        ttk.Label(parent, text="Edit existing perfume — per-field review",
+                  style="TLabel").pack(anchor="w", padx=8, pady=(8, 4))
+
+        target_frame = ttk.LabelFrame(parent, text=" Target ", style="TLabelframe")
+        target_frame.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+        if perfume is None:
+            snap_name = draft.get("perfume_name_snapshot") or "(unknown)"
+            snap_brand = draft.get("brand_name_snapshot") or ""
+            snap_head = f"{snap_brand} — {snap_name}" if snap_brand else snap_name
+            ttk.Label(target_frame,
+                      text=f"Referenced perfume no longer exists.\n"
+                           f"Draft snapshot: {snap_head}\n"
+                           f"This draft cannot be applied and will be skipped.",
+                      style="Muted.TLabel", justify="left",
+                      wraplength=dpi_px(480)
+                      ).pack(anchor="w", padx=4, pady=2)
+            st["target_missing"] = True
+            return
+        st["target_missing"] = False
+        b = self.app.get_brand_name(perfume.brand_id)
+        ttk.Label(target_frame, text=f"{b} — {perfume.name}",
+                  style="TLabel").pack(anchor="w", padx=4)
+
+        modified = draft.get("modified_fields", {}) or {}
+        if not modified:
+            ttk.Label(parent,
+                      text="Draft has no modified fields; nothing to apply.",
+                      style="Muted.TLabel").pack(anchor="w", padx=8, pady=8)
+            return
+
+        # For each modified field, show "current" vs "draft" and let the
+        # user pick which side wins (or Manual).  The choice is stored
+        # in st["field_choices"][field] as a tk.StringVar with values
+        # "current" / "draft" / "manual", and st["field_manual"][field]
+        # as an editable StringVar (or list for multi-value).
+        st.setdefault("field_choices", {})
+        st.setdefault("field_manual", {})
+
+        diff_frame = ttk.LabelFrame(parent, text=" Field-by-field ",
+                                    style="TLabelframe")
+        diff_frame.pack(fill="both", expand=True, padx=8, pady=4,
+                        ipadx=6, ipady=4)
+
+        for field_key, new_value in modified.items():
+            current = self._current_field_value(perfume, field_key)
+            self._render_field_diff_row(diff_frame, tid, field_key,
+                                        current, new_value)
+
+    # ---------- Approve loop ----------
+
+    def _on_approve_selected(self):
+        if not self.drafts:
+            return
+        to_apply = [d for d in self.drafts
+                    if self.resolutions[d["temp_id"]]["approved"].get()]
+        if not to_apply:
+            messagebox.showinfo("Nothing selected",
+                                "No drafts are checked for approval.",
+                                parent=self)
+            return
+        if not messagebox.askyesno(
+                "Confirm import",
+                f"Apply {len(to_apply)} draft(s) to your library?\n\n"
+                f"Approved drafts are removed after import; failed ones stay "
+                f"so you can adjust and retry.",
+                parent=self):
+            return
+
+        # Track per-draft outcome by temp_id so we can partition after.
+        applied_ids: set = set()
+        skipped: List[Tuple[str, str]] = []  # (short summary, reason)
+        for d in to_apply:
+            try:
+                ok, reason = self._apply_draft(d)
+            except Exception as e:  # defensive: keep the batch going
+                ok, reason = False, f"unexpected error: {e}"
+            if ok:
+                applied_ids.add(d["temp_id"])
+            else:
+                head = self._summarize_draft(d).splitlines()[0]
+                skipped.append((head, reason))
+
+        if applied_ids:
+            self.app.save()
+            self.app._refresh_list()
+            self.app._on_select()
+
+        summary_lines = [f"Imported {len(applied_ids)} draft(s)."]
+        if skipped:
+            summary_lines.append("")
+            summary_lines.append(f"Skipped {len(skipped)}:")
+            for head, reason in skipped:
+                summary_lines.append(f"  \u2022 {head} \u2014 {reason}")
+        messagebox.showinfo("Import result", "\n".join(summary_lines),
+                            parent=self)
+
+        # Drop successfully applied drafts; keep failures for retry.
+        self.drafts = [d for d in self.drafts if d["temp_id"] not in applied_ids]
+        for gid in list(self.resolutions.keys()):
+            if gid not in {d["temp_id"] for d in self.drafts}:
+                self.resolutions.pop(gid, None)
+        if self.selected_temp_id not in {d["temp_id"] for d in self.drafts}:
+            self.selected_temp_id = None
+        self._refresh_list()
+        if self.selected_temp_id is None and self.drafts:
+            self._on_select_draft(self.drafts[0]["temp_id"])
+        elif not self.drafts:
+            self._render_detail_placeholder("All drafts processed.")
+            self.approve_button.config(state="disabled")
+
+    def _apply_draft(self, draft: Dict) -> Tuple[bool, str]:
+        kind = draft["kind"]
+        if kind == "new_event":
+            return self._apply_new_event(draft)
+        if kind == "new_perfume":
+            return self._apply_new_perfume(draft)
+        if kind == "edit_perfume":
+            return self._apply_edit_perfume(draft)
+        return False, f"unsupported kind {kind!r}"
+
+    def _apply_new_event(self, draft: Dict) -> Tuple[bool, str]:
+        tid = draft["temp_id"]
+        st = self.resolutions[tid]
+        # Resolve target perfume: either the id was still valid at render
+        # time, or the user picked a redirect.
+        target_id = st.get("target_perfume_id")
+        if not target_id:
+            redirect_var = st.get("redirect_var")
+            if redirect_var is None or redirect_var.get() == "(skip)":
+                return False, "target perfume no longer exists and no redirect chosen"
+            label = redirect_var.get()
+            target_id = st["redirect_map"].get(label)
+            if not target_id:
+                return False, "invalid redirect selection"
+        perfume = next((p for p in self.app.app_data.perfumes
+                        if p.id == target_id), None)
+        if perfume is None:
+            return False, "target perfume disappeared during import"
+
+        evt_data = draft.get("event", {}) or {}
+        loc_name = evt_data.get("outlet_name_new") or ""
+        if not loc_name and evt_data.get("outlet_id"):
+            loc_name = self._outlet_display_name(evt_data["outlet_id"]) or ""
+        self.app._add_event_simple(
+            perfume,
+            evt_data.get("event_type", "smell"),
+            location=loc_name,
+            note=evt_data.get("note") or "",
+            event_date=evt_data.get("event_date") or "",
+        )
+        return True, ""
+
+    def _apply_new_perfume(self, draft: Dict) -> Tuple[bool, str]:
+        tid = draft["temp_id"]
+        st = self.resolutions[tid]
+        # Read everything straight from the persistent resolution state
+        # (seeded in _init_resolution_for), NOT from the "_choice" widget
+        # dicts -- those only exist after the draft's detail pane has been
+        # rendered, so a draft the user never clicked would KeyError here.
+        name = (st["name_var"].get() or "").strip()
+
+        brand_name = (st["brand_var"].get() or "").strip()
+        if not brand_name:
+            return False, "brand is required"
+        brand_id = self.app.find_or_create_brand_id(brand_name)
+
+        if not name:
+            return False, "name is required"
+
+        p = Perfume(id=new_id(), name=name, brand_id=brand_id)
+
+        conc_name = (st["concentration_var"].get() or "").strip()
+        p.concentration_id = (self.app.find_or_create_concentration_id(conc_name)
+                              if conc_name else "")
+
+        year_str = (st["year_var"].get() or "").strip()
+        p.year = int(year_str) if year_str.isdigit() else 0
+
+        # Multi-value: resolve the persistent name lists to ids.
+        p.tag_ids = [self.app.find_or_create_tag_id(n)
+                     for n in st["tags_names"] if n.strip()]
+        p.outlet_ids = [self.app.find_or_create_outlet(n)
+                        for n in st["outlets_names"] if n.strip()]
+
+        # Preload notes / links / fragrantica_url / my_votes from draft.
+        # Notes need to be dataclass instances because downstream code
+        # (ui_edit_notes, save serializer via asdict) expects Note objects,
+        # not plain dicts.  Links stay as {"label","url"} dicts to match
+        # the existing schema.
+        data = draft.get("data", {}) or {}
+        p.notes = []
+        for nd in (data.get("notes") or []):
+            if not isinstance(nd, dict):
+                continue
+            p.notes.append(Note(
+                id=nd.get("id") or new_id(),
+                title=nd.get("title") or "Note",
+                content=nd.get("content") or "",
+            ))
+        p.links = list(data.get("links") or [])
+        fr_url = data.get("fragrantica_url")
+        if fr_url:
+            # Fragrantica dict schema mirrors what edit-fragrantica writes.
+            p.fragrantica = {"url": fr_url}
+        my_votes = data.get("my_votes") or {}
+        if my_votes:
+            p.my_votes = dict(my_votes)
+
+        # Register the perfume at its location->brand->year position, then
+        # append its initial events (if any).
+        self.app._insert_imported_perfume(p)
+        for evt_data in (data.get("events") or []):
+            loc_name = evt_data.get("outlet_name_new") or ""
+            if not loc_name and evt_data.get("outlet_id"):
+                loc_name = self._outlet_display_name(evt_data["outlet_id"]) or ""
+            self.app._add_event_simple(
+                p,
+                evt_data.get("event_type", "smell"),
+                location=loc_name,
+                note=evt_data.get("note") or "",
+                event_date=evt_data.get("event_date") or "",
+            )
+        return True, ""
+
+    def _apply_edit_perfume(self, draft: Dict) -> Tuple[bool, str]:
+        tid = draft["temp_id"]
+        st = self.resolutions[tid]
+        if st.get("target_missing"):
+            return False, "target perfume no longer exists"
+        p_id = draft.get("perfume_id", "")
+        perfume = next((p for p in self.app.app_data.perfumes if p.id == p_id),
+                       None)
+        if perfume is None:
+            return False, "target perfume no longer exists"
+        modified = draft.get("modified_fields", {}) or {}
+        field_choices = st.get("field_choices", {})
+        field_manual = st.get("field_manual", {})
+        for field_key, draft_val in modified.items():
+            choice_var = field_choices.get(field_key)
+            choice = choice_var.get() if choice_var is not None else "draft"
+            if choice == "current":
+                continue
+            if choice == "manual":
+                new_val = self._read_manual_field(field_key, field_manual)
+            else:  # "draft"
+                new_val = draft_val
+            self._apply_field_change(perfume, field_key, new_val)
+        return True, ""
+
+    # ---------- Small helpers used by multiple sections ----------
+
+    def _kv_row(self, parent, key: str, value: str):
+        row = ttk.Frame(parent, style="TFrame")
+        row.pack(fill="x", padx=4, pady=1)
+        ttk.Label(row, text=f"{key}:", width=14, anchor="w",
+                  style="Muted.TLabel").pack(side="left")
+        ttk.Label(row, text=str(value), anchor="w",
+                  style="TLabel", wraplength=dpi_px(360), justify="left"
+                  ).pack(side="left", fill="x", expand=True)
+
+    def _entry_row(self, parent, label: str, var: tk.StringVar, width: int = 32):
+        row = ttk.Frame(parent, style="TFrame")
+        row.pack(fill="x", padx=4, pady=2)
+        ttk.Label(row, text=f"{label}:", width=14, anchor="w",
+                  style="TLabel").pack(side="left")
+        ttk.Entry(row, textvariable=var, width=width).pack(side="left")
+
+    def _outlet_display_name(self, outlet_id: str) -> str:
+        info = self.app.app_data.outlets_map.get(outlet_id)
+        if info is None:
+            return ""
+        if isinstance(info, OutletInfo):
+            return info.name
+        return str(info)
+
+    def _draft_brand_display(self, data: Dict) -> str:
+        if data.get("brand_id"):
+            return (self.app.get_brand_name(data["brand_id"])
+                    or data.get("brand_name_snapshot") or "")
+        return data.get("brand_name_new") or data.get("brand_name_snapshot") or ""
+
+    def _find_similar_perfumes(self, query: str, limit: int = 3) -> List[Tuple[Any, float]]:
+        q = (query or "").strip().lower()
+        if not q:
+            return []
+        scored: List[Tuple[Any, float]] = []
+        for p in self.app.app_data.perfumes:
+            b = self.app.get_brand_name(p.brand_id) or ""
+            combined = f"{b} {p.name}".strip().lower()
+            ratio = difflib.SequenceMatcher(None, q, combined).ratio()
+            if ratio >= 0.7:
+                scored.append((p, ratio))
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored[:limit]
+
+    # ---- Name resolution widgets ----
+
+    def _build_name_resolver(self, parent, label: str,
+                             var: tk.StringVar,
+                             existing_id: Optional[str],
+                             name_snapshot: Optional[str],
+                             name_new: Optional[str],
+                             candidates: List[str],
+                             allow_none: bool = False) -> Dict[str, Any]:
+        """Render a row that resolves a single-value name reference.
+
+        `var` is a persistent StringVar owned by the draft's resolution
+        state (created in _init_resolution_for), so edits survive the
+        detail pane being destroyed/rebuilt when switching drafts.
+
+        Semantics (mirrors the draft schema):
+          - existing_id + name_snapshot: user picked from existing list on
+            mobile.  The var is pre-filled with the current map name (or the
+            snapshot if the id vanished).
+          - name_new: user typed a new name on mobile.  Show fuzzy matches
+            as suggestions; user can pick a match or confirm-as-new.
+
+        Returns a state dict the Approve step reads via _resolve_name_choice.
+        """
+        row = ttk.Frame(parent, style="TFrame")
+        row.pack(fill="x", padx=4, pady=2)
+        ttk.Label(row, text=f"{label}:", width=14, anchor="w",
+                  style="TLabel").pack(side="left")
+
+        # Stale = the draft referenced an id that no longer exists.
+        # Deterministic from the draft data, so safe to recompute each render.
+        stale = bool(existing_id) and not self._existing_name_by_id(label, existing_id)
+
+        cb_values = list(candidates)
+        # Combobox is searchable so long lists are usable.
+        cb = ttk.Combobox(row, textvariable=var, values=cb_values, width=28)
+        cb.pack(side="left", padx=(0, 4))
+        make_combobox_searchable(cb, cb_values)
+
+        hint_frame = ttk.Frame(parent, style="TFrame")
+        hint_frame.pack(fill="x", padx=4, pady=(0, 4))
+        hint_lbl = ttk.Label(hint_frame, text="", style="Muted.TLabel",
+                             wraplength=dpi_px(480), justify="left")
+        hint_lbl.pack(anchor="w", padx=(122, 0))  # align under the entry
+
+        # Populate hint text.
+        hint_parts: List[str] = []
+        if stale:
+            hint_parts.append(
+                f"Original id no longer exists (snapshot: {name_snapshot or '?'})."
+            )
+        if name_new:
+            matches = fuzzy_match_names(name_new, candidates, limit=3)
+            if matches:
+                m_str = ", ".join(f"{n} ({int(r * 100)}%)" for n, r in matches)
+                hint_parts.append(f"Fuzzy matches: {m_str}")
+            else:
+                hint_parts.append("No close match found -- Approve will create a new entry.")
+        if not hint_parts and existing_id and not stale:
+            hint_parts.append("Existing entry -- Approve will reuse it.")
+        if allow_none and not var.get():
+            hint_parts.insert(0, "(optional; leave blank to skip)")
+        hint_lbl.config(text="  ".join(hint_parts))
+
+        return {"var": var, "candidates": candidates, "allow_none": allow_none}
+
+    def _existing_name_by_id(self, label: str, existing_id: str) -> str:
+        # Map from label to the correct app_data source
+        mp = None
+        if label == "Brand":
+            mp = self.app.app_data.brands_map
+        elif label == "Concentration":
+            mp = self.app.app_data.concentrations_map
+        elif label == "Location" or label == "Locations":
+            info = self.app.app_data.outlets_map.get(existing_id)
+            if isinstance(info, OutletInfo):
+                return info.name
+            return str(info) if info else ""
+        elif label == "Tag" or label == "Tags":
+            mp = self.app.app_data.tags_map
+        if mp is None:
+            return ""
+        return mp.get(existing_id, "")
+
+    def _resolve_name_choice(self, choice_state: Dict[str, Any],
+                             creator, required: bool) -> Optional[str]:
+        """Return an id for the chosen name (creating one if missing).
+
+        Returns None only when the value is required but empty; otherwise
+        returns "" for empty-optional or a valid id string."""
+        name = (choice_state["var"].get() or "").strip()
+        if not name:
+            if required:
+                return None
+            return ""
+        return creator(name)
+
+    def _build_multi_name_resolver(self, parent, label: str,
+                                   chosen: List[str],
+                                   stale_notes: List[str],
+                                   names_new: List[str],
+                                   candidates: List[str]) -> Dict[str, Any]:
+        """Multi-value equivalent of _build_name_resolver.
+
+        `chosen` is the persistent list owned by the draft's resolution
+        state (created in _init_resolution_for).  The Listbox is a *view*
+        of this list: add/remove mutate `chosen` in place AND the widget,
+        so Approve can read the plain list regardless of whether the widget
+        still exists.  This is the fix for the "invalid command name
+        ...listbox" crash that happened when approving drafts whose detail
+        pane had been destroyed by navigating away.
+        """
+        frame = ttk.LabelFrame(parent, text=f" {label} ", style="TLabelframe")
+        frame.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+
+        # Chosen box + remove button
+        box_row = ttk.Frame(frame, style="TFrame")
+        box_row.pack(fill="x", pady=(2, 2))
+        listbox = tk.Listbox(box_row, height=min(6, max(3, len(chosen) + 1)),
+                             bg=COLORS["panel"], fg=COLORS["text"],
+                             selectbackground=COLORS["accent"],
+                             activestyle="none", exportselection=False)
+        listbox.pack(side="left", fill="x", expand=True)
+        for name in chosen:
+            listbox.insert("end", name)
+
+        def remove_selected():
+            # Delete from both the widget and the backing list (high->low
+            # so indices stay valid).
+            for idx in sorted(listbox.curselection(), reverse=True):
+                listbox.delete(idx)
+                if 0 <= idx < len(chosen):
+                    del chosen[idx]
+
+        ttk.Button(box_row, text="Remove", command=remove_selected,
+                   width=8).pack(side="left", padx=(4, 0))
+
+        # Add row: combobox of existing + Add button
+        add_row = ttk.Frame(frame, style="TFrame")
+        add_row.pack(fill="x", pady=(2, 4))
+        add_var = tk.StringVar()
+        cb = ttk.Combobox(add_row, textvariable=add_var, values=candidates,
+                          width=28)
+        cb.pack(side="left")
+        make_combobox_searchable(cb, candidates)
+
+        def add_entry():
+            val = (add_var.get() or "").strip()
+            if not val:
+                return
+            if val in chosen:
+                add_var.set("")
+                return
+            chosen.append(val)
+            listbox.insert("end", val)
+            add_var.set("")
+
+        ttk.Button(add_row, text="Add", command=add_entry,
+                   width=6).pack(side="left", padx=(4, 0))
+
+        if stale_notes:
+            ttk.Label(frame, text="\n".join(stale_notes),
+                      style="Muted.TLabel", wraplength=dpi_px(500),
+                      justify="left").pack(anchor="w", padx=4, pady=(0, 2))
+
+        # Fuzzy hint for names_new
+        for nm in names_new:
+            matches = fuzzy_match_names(nm, candidates, limit=3)
+            if matches:
+                m_str = ", ".join(f"{n} ({int(r * 100)}%)" for n, r in matches)
+                ttk.Label(frame,
+                          text=f"Fuzzy matches for '{nm}': {m_str}",
+                          style="Muted.TLabel",
+                          wraplength=dpi_px(500), justify="left"
+                          ).pack(anchor="w", padx=4)
+
+        # Return the backing list itself so Approve reads plain data,
+        # never a (possibly destroyed) widget.
+        return {"names": chosen}
+
+    def _resolve_multi_name_choice(self, choice_state: Dict[str, Any],
+                                   creator) -> List[str]:
+        names = list(choice_state.get("names", []))
+        return [creator(n) for n in names if n.strip()]
+
+    def _render_event_readonly(self, parent, evt: Dict):
+        row = ttk.Frame(parent, style="TFrame")
+        row.pack(fill="x", padx=4, pady=1)
+        outlet = evt.get("outlet_name_new") or ""
+        if not outlet and evt.get("outlet_id"):
+            outlet = self._outlet_display_name(evt["outlet_id"]) or ""
+        parts = [evt.get("event_type", "?"),
+                 evt.get("event_date") or "(today)"]
+        if outlet:
+            parts.append(f"@ {outlet}")
+        if evt.get("note"):
+            parts.append(f"— {evt['note']}")
+        ttk.Label(row, text="  ".join(parts), style="Muted.TLabel",
+                  wraplength=dpi_px(480), justify="left"
+                  ).pack(anchor="w")
+
+    # ---- per-field diff for edit_perfume ----
+
+    def _current_field_value(self, perfume, field_key: str) -> Any:
+        """Read the current value of a perfume field for edit diff display.
+
+        Supports the same field keys the mobile writes in modified_fields.
+        """
+        if field_key == "name":
+            return perfume.name
+        if field_key == "year":
+            return perfume.year or ""
+        if field_key == "tags":
+            return {"tag_ids": list(perfume.tag_ids)}
+        if field_key == "notes":
+            return list(perfume.notes)
+        if field_key == "links":
+            return list(perfume.links)
+        if field_key == "my_votes":
+            return dict(perfume.my_votes or {})
+        if field_key == "fragrantica_url":
+            return (perfume.fragrantica or {}).get("url", "")
+        return None
+
+    def _apply_field_change(self, perfume, field_key: str, new_val: Any):
+        """Write a resolved new value into a perfume.  Only fields we
+        support from the mobile are handled; unknown keys are ignored
+        rather than crashed so future schema fields degrade gracefully."""
+        if field_key == "name" and isinstance(new_val, str):
+            perfume.name = new_val
+        elif field_key == "year":
+            try:
+                perfume.year = int(new_val) if new_val else 0
+            except (TypeError, ValueError):
+                pass
+        elif field_key == "tags" and isinstance(new_val, dict):
+            tag_ids = list(new_val.get("tag_ids") or [])
+            for nm in (new_val.get("tag_names_new") or []):
+                tag_ids.append(self.app.find_or_create_tag_id(nm))
+            perfume.tag_ids = tag_ids
+        elif field_key == "notes" and isinstance(new_val, list):
+            converted: List[Note] = []
+            for nd in new_val:
+                if isinstance(nd, Note):
+                    converted.append(nd)
+                elif isinstance(nd, dict):
+                    converted.append(Note(
+                        id=nd.get("id") or new_id(),
+                        title=nd.get("title") or "Note",
+                        content=nd.get("content") or "",
+                    ))
+            perfume.notes = converted
+        elif field_key == "links" and isinstance(new_val, list):
+            perfume.links = list(new_val)
+        elif field_key == "my_votes" and isinstance(new_val, dict):
+            perfume.my_votes = dict(new_val)
+        elif field_key == "fragrantica_url" and isinstance(new_val, str):
+            fr = dict(perfume.fragrantica or {})
+            fr["url"] = new_val
+            perfume.fragrantica = fr
+
+    def _render_field_diff_row(self, parent, tid: str, field_key: str,
+                               current: Any, new_val: Any):
+        """Show a diff row for one field with three actions:
+             ○ Use current   ○ Use draft   ○ Manual...
+        Manual is intentionally kept minimal for v1 -- it just accepts a
+        text override for simple scalar fields (name, year,
+        fragrantica_url).  Complex fields (tags, notes, my_votes, links)
+        fall back to current/draft only.
+        """
+        st = self.resolutions[tid]
+        st["field_choices"].setdefault(field_key, tk.StringVar(value="draft"))
+        choice_var = st["field_choices"][field_key]
+
+        frame = ttk.Frame(parent, style="TFrame")
+        frame.pack(fill="x", pady=4)
+
+        ttk.Label(frame, text=field_key, style="TLabel"
+                  ).pack(anchor="w", padx=2)
+
+        # Show current / draft values
+        vals_row = ttk.Frame(frame, style="TFrame")
+        vals_row.pack(fill="x", padx=(16, 4))
+
+        cur_col = ttk.Frame(vals_row, style="TFrame")
+        cur_col.pack(side="left", fill="x", expand=True, padx=(0, 8))
+        ttk.Label(cur_col, text="Current:", style="Muted.TLabel"
+                  ).pack(anchor="w")
+        ttk.Label(cur_col, text=self._fmt_field_value(field_key, current),
+                  style="TLabel", wraplength=dpi_px(200), justify="left"
+                  ).pack(anchor="w")
+
+        new_col = ttk.Frame(vals_row, style="TFrame")
+        new_col.pack(side="left", fill="x", expand=True)
+        ttk.Label(new_col, text="Draft:", style="Muted.TLabel"
+                  ).pack(anchor="w")
+        ttk.Label(new_col, text=self._fmt_field_value(field_key, new_val),
+                  style="TLabel", wraplength=dpi_px(200), justify="left"
+                  ).pack(anchor="w")
+
+        # Radio choices
+        choice_row = ttk.Frame(frame, style="TFrame")
+        choice_row.pack(fill="x", padx=(16, 4))
+        ttk.Radiobutton(choice_row, text="Use current",
+                        variable=choice_var, value="current",
+                        style="TRadiobutton").pack(side="left")
+        ttk.Radiobutton(choice_row, text="Use draft",
+                        variable=choice_var, value="draft",
+                        style="TRadiobutton").pack(side="left", padx=(12, 0))
+        if field_key in ("name", "year", "fragrantica_url"):
+            ttk.Radiobutton(choice_row, text="Manual:",
+                            variable=choice_var, value="manual",
+                            style="TRadiobutton").pack(side="left", padx=(12, 0))
+            fm = st.setdefault("field_manual", {})
+            # Reuse a persistent StringVar so manual edits survive the
+            # detail pane being rebuilt when switching drafts.
+            if field_key not in fm:
+                fm[field_key] = tk.StringVar(
+                    value=self._fmt_field_value(field_key, new_val))
+            ttk.Entry(choice_row, textvariable=fm[field_key], width=20
+                      ).pack(side="left", padx=(4, 0))
+
+    def _fmt_field_value(self, field_key: str, val: Any) -> str:
+        if val is None:
+            return "—"
+        if isinstance(val, dict) and field_key == "tags":
+            names = [self.app.get_tag_name(t) or t
+                     for t in (val.get("tag_ids") or [])]
+            names += list(val.get("tag_names_new") or [])
+            return ", ".join(names) if names else "(none)"
+        if isinstance(val, list) and field_key == "notes":
+            return f"{len(val)} note(s)"
+        if isinstance(val, list) and field_key == "links":
+            return f"{len(val)} link(s)"
+        if isinstance(val, dict) and field_key == "my_votes":
+            bits = []
+            for k, v in val.items():
+                if isinstance(v, dict) and v:
+                    bits.append(f"{k}: " +
+                                ", ".join(f"{opt}={cnt}" for opt, cnt in v.items()))
+            return "\n".join(bits) if bits else "(empty)"
+        return str(val)
+
+    def _read_manual_field(self, field_key: str,
+                           field_manual: Dict[str, Any]) -> Any:
+        var = field_manual.get(field_key)
+        if var is None:
+            return None
+        raw = var.get()
+        if field_key == "year":
+            try:
+                return int(raw) if raw.strip() else 0
+            except ValueError:
+                return 0
+        return raw
+
+
+# -----------------------------
 # Main App
 # -----------------------------
 class App(tk.Tk):
@@ -5046,6 +6489,30 @@ class App(tk.Tk):
         new_oid = new_id()
         self.app_data.outlets_map[new_oid] = OutletInfo(name=name.strip(), region="")
         return new_oid
+
+    def find_concentration_id(self, conc_name: str) -> str:
+        """Find concentration ID by name, return empty string if not found."""
+        for cid, cname in self.app_data.concentrations_map.items():
+            if cname == conc_name:
+                return cid
+        return ""
+
+    def find_or_create_concentration_id(self, conc_name: str) -> str:
+        """Find concentration ID by name, or create a new one if not found.
+
+        Symmetric with brand/tag/outlet.  Kept for mobile-import support
+        where the phone might carry a `concentration_name_new` string --
+        even if the desktop UI doesn't usually let the user type new
+        concentrations inline, we honour the mobile-side text on import."""
+        name = (conc_name or "").strip()
+        if not name:
+            return ""
+        cid = self.find_concentration_id(name)
+        if cid:
+            return cid
+        new_cid = new_id()
+        self.app_data.concentrations_map[new_cid] = name
+        return new_cid
     
     def get_all_brand_names(self) -> List[str]:
         """Get all brand names in mapping order"""
@@ -5200,7 +6667,9 @@ class App(tk.Tk):
         # Pack order determines shrink priority (last packed with expand shrinks first)
         # Left side: Add + Manage + Font zoom (fixed, won't shrink)
         ttk.Button(top_frame, text="Add", command=self.ui_add_perfume).pack(side="left", padx=(0, 4))
-        ttk.Button(top_frame, text="Manage", command=self.ui_open_manage_data).pack(side="left", padx=(0, 8))
+        ttk.Button(top_frame, text="Manage", command=self.ui_open_manage_data).pack(side="left", padx=(0, 4))
+        ttk.Button(top_frame, text="Import",
+                   command=self.ui_open_mobile_import).pack(side="left", padx=(0, 8))
         
         # Settings button (⚙)
         settings_btn = tk.Label(top_frame, text="⚙", fg=COLORS["muted"], bg=COLORS["panel"],
@@ -5834,7 +7303,81 @@ class App(tk.Tk):
                     insert_idx = i + 1
                     break
         self.perfumes.insert(insert_idx, p)
-    
+
+    def _insert_imported_perfume(self, p: Perfume):
+        """Place an imported perfume into the manual order following the
+        user's scheme: anchor to perfumes sharing the same PRIMARY location
+        (first outlet), then order by brand name (alphabetical), then by
+        year (ascending; unknown year sorts to the end of its brand group).
+
+        Why location-anchored: the collection is organised so that perfumes
+        from the same place sit together, and within that, brands run
+        alphabetically and each brand's entries run old->new by year.  This
+        matches both the big single-shop blocks (e.g. taigrance) and the
+        designer/brand region (where same-location perfumes are themselves
+        in brand-alphabetical order).
+
+        Behaviour:
+          - Same location + same brand already present -> slot by year right
+            inside that brand's run (keeps the brand block contiguous).
+          - Same location, new brand -> insert at the alphabetical brand
+            position among that location's perfumes.
+          - Location not seen before -> append to the end (user repositions
+            the whole new-location group once).
+        """
+        new_loc = (p.outlet_ids or [None])[0]
+        new_year = p.year if p.year else 10 ** 9  # unknown -> end of group
+
+        same_loc = [(i, x) for i, x in enumerate(self.perfumes)
+                    if (x.outlet_ids or [None])[0] == new_loc]
+        if not same_loc:
+            # No perfume shares this primary location yet (e.g. a brand's
+            # counter that has no entries, or a brand-new outlet).  Fall
+            # back to sitting beside the same brand anywhere by year, so the
+            # brand at least stays grouped; only append when the brand is
+            # also new to the collection.
+            same_brand_any = [(i, x) for i, x in enumerate(self.perfumes)
+                              if x.brand_id == p.brand_id]
+            if same_brand_any:
+                insert_at = None
+                for i, x in same_brand_any:
+                    if (x.year if x.year else 10 ** 9) > new_year:
+                        insert_at = i
+                        break
+                if insert_at is None:
+                    insert_at = same_brand_any[-1][0] + 1
+                self.perfumes.insert(insert_at, p)
+                return
+            self.perfumes.append(p)
+            return
+
+        # Prefer the same-brand run at this location so the brand stays
+        # contiguous; insert by year.
+        same_brand = [(i, x) for i, x in same_loc if x.brand_id == p.brand_id]
+        if same_brand:
+            insert_at = None
+            for i, x in same_brand:
+                if (x.year if x.year else 10 ** 9) > new_year:
+                    insert_at = i
+                    break
+            if insert_at is None:
+                insert_at = same_brand[-1][0] + 1
+            self.perfumes.insert(insert_at, p)
+            return
+
+        # New brand at this location: alphabetical brand position among the
+        # location's perfumes (case-insensitive by display name).
+        new_brand = (self.get_brand_name(p.brand_id) or "").lower()
+        insert_at = None
+        for i, x in same_loc:
+            xb = (self.get_brand_name(x.brand_id) or "").lower()
+            if xb > new_brand:
+                insert_at = i
+                break
+        if insert_at is None:
+            insert_at = same_loc[-1][0] + 1
+        self.perfumes.insert(insert_at, p)
+
     def _lock_order(self):
         """Apply current sort to ALL perfumes as the new manual order, then clear sort."""
         if not self.sort_config.dimensions:
@@ -6725,6 +8268,11 @@ class App(tk.Tk):
     def ui_add_perfume(self):
         """Open Add Perfume dialog (uses shared dialog)"""
         self._open_perfume_dialog(None, is_new=True)
+
+    def ui_open_mobile_import(self):
+        """Open the Mobile Import dialog for reviewing and applying a
+        JSON bundle produced by the web app (Layers 1-3)."""
+        MobileImportDialog(self)
 
     def _quick_smell(self):
         """Quick add smell event"""

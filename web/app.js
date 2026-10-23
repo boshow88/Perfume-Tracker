@@ -141,6 +141,7 @@ document.addEventListener('DOMContentLoaded', init);
 
 async function init() {
     setupEventListeners();
+    initDrafts();
     await loadData();
 }
 
@@ -1350,6 +1351,13 @@ function closeAllModals() {
     document.getElementById('sort-modal').classList.add('hidden');
     document.getElementById('filter-modal').classList.add('hidden');
     document.getElementById('settings-modal').classList.add('hidden');
+    // Draft modals (Phase 2).  These IDs may not exist during very early
+    // startup but are always present by the time this runs.
+    const draftModalIds = ['drafts-modal', 'event-modal', 'perfume-form-modal', 'export-modal'];
+    draftModalIds.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.classList.add('hidden');
+    });
 }
 
 // ============================================
@@ -1858,4 +1866,1107 @@ function setSelectValues(id, values) {
     Array.from(select.options).forEach(opt => {
         opt.selected = values.includes(opt.value);
     });
+}
+
+// ============================================
+// Mobile Data Entry (Drafts) — Phase 2
+// ============================================
+//
+// Wire format matches the desktop MobileImportDialog in perfume_tracker.py.
+// Drafts live in localStorage only; export produces a version-1 bundle the
+// desktop dialog reads.  See the schema block near the top of the Python
+// file for the full contract.
+
+const DRAFTS_STORAGE_KEY = 'perfumeTracker.drafts.v1';
+const DRAFTS_BUNDLE_VERSION = 1;
+const DRAFTS_GENERATOR = 'perfume-tracker-web/1.0';
+
+// Which dimensions get the compact vote UI.
+//
+// IMPORTANT: `key` here must be the *personal* vote key (my_* prefix),
+// not the Fragrantica-side key.  These are the keys used *inside*
+// p.my_votes.  Corresponds to VOTE_BLOCKS[*].myKey in this file.
+// Writing to bare "rating_votes" instead of "my_rating_votes" here
+// (a) fails to pre-select the user's existing personal vote in the
+// compact UI, and (b) writes new votes under a key that desktop UI
+// silently ignores -- so the mobile edit effectively becomes a no-op.
+//
+// season_time_votes is intentionally excluded from the compact UI
+// because "when to wear" is 6 tap targets and mobile-heavy users usually
+// vote it from the desktop; leaving it out keeps the form short.  If
+// you want it later, add {key:'my_season_time_votes', ...} here.
+const COMPACT_VOTE_DIMS = [
+    { key: 'my_rating_votes',    label: 'Rating',     options: ['love','like','ok','dislike','hate'] },
+    { key: 'my_longevity_votes', label: 'Longevity',  options: ['eternal','long','moderate','weak','poor'] },
+    { key: 'my_sillage_votes',   label: 'Sillage',    options: ['enormous','strong','moderate','intimate'] },
+    { key: 'my_value_votes',     label: 'Value',      options: ['excellent','good','fair','expensive','overpriced'] },
+    { key: 'my_gender_votes',    label: 'Gender',     options: ['male','more_male','unisex','more_female','female'] },
+];
+
+// Draft-list state.  Loaded on init; every mutation writes back through saveDrafts().
+let drafts = [];
+
+// Modal context tracked so Save knows whether to overwrite an existing
+// draft or append a new one.
+let currentEventDraftEditing = null;
+let currentEventPerfume = null;
+let pformContext = { mode: 'new', originalPerfume: null, draft: null };
+let pformInitialEvents = [];
+
+// ---------- localStorage ----------
+
+function loadDrafts() {
+    try {
+        const raw = localStorage.getItem(DRAFTS_STORAGE_KEY);
+        if (!raw) return [];
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+        console.warn('Failed to load drafts:', e);
+        return [];
+    }
+}
+
+function saveDrafts() {
+    try {
+        localStorage.setItem(DRAFTS_STORAGE_KEY, JSON.stringify(drafts));
+    } catch (e) {
+        alert('Failed to save drafts to localStorage: ' + e.message);
+    }
+    updateDraftsBadge();
+}
+
+function clearAllDrafts() {
+    drafts = [];
+    saveDrafts();
+}
+
+function newTempId() {
+    // Not a proper UUID; the desktop only treats these as opaque strings.
+    return 'draft-' + Date.now().toString(36) + '-' +
+           Math.random().toString(36).slice(2, 10);
+}
+
+function nowIso() {
+    return new Date().toISOString();
+}
+
+// ---------- Draft factories ----------
+
+function makeNewEventDraft(perfume, event) {
+    return {
+        kind: 'new_event',
+        temp_id: newTempId(),
+        created_at: nowIso(),
+        perfume_id: perfume.id,
+        perfume_name_snapshot: perfume.name,
+        brand_name_snapshot: brandsMap[perfume.brand_id] || '',
+        event: event,
+    };
+}
+
+function makeNewPerfumeDraft(data) {
+    return {
+        kind: 'new_perfume',
+        temp_id: newTempId(),
+        created_at: nowIso(),
+        data: data,
+    };
+}
+
+function makeEditPerfumeDraft(perfume, modifiedFields) {
+    return {
+        kind: 'edit_perfume',
+        temp_id: newTempId(),
+        created_at: nowIso(),
+        perfume_id: perfume.id,
+        perfume_name_snapshot: perfume.name,
+        brand_name_snapshot: brandsMap[perfume.brand_id] || '',
+        modified_fields: modifiedFields,
+    };
+}
+
+// ---------- Bootstrap ----------
+
+function initDrafts() {
+    drafts = loadDrafts();
+    updateDraftsBadge();
+    wireDraftEventListeners();
+}
+
+function updateDraftsBadge() {
+    const badge = document.getElementById('drafts-badge');
+    if (!badge) return;
+    const n = drafts.length;
+    if (n === 0) {
+        badge.classList.add('hidden');
+    } else {
+        badge.classList.remove('hidden');
+        badge.textContent = n > 99 ? '99+' : String(n);
+    }
+}
+
+function wireDraftEventListeners() {
+    document.getElementById('drafts-btn').addEventListener('click', openDraftsModal);
+    document.getElementById('drafts-add-perfume').addEventListener('click', () => {
+        document.getElementById('drafts-modal').classList.add('hidden');
+        openNewPerfumeModal();
+    });
+    document.getElementById('drafts-clear-all').addEventListener('click', handleClearAllDrafts);
+    document.getElementById('drafts-export').addEventListener('click', () => {
+        document.getElementById('drafts-modal').classList.add('hidden');
+        openExportModal();
+    });
+
+    document.getElementById('detail-add-event').addEventListener('click', () => {
+        const p = getSelectedPerfume();
+        if (p) openNewEventModal(p);
+    });
+    document.getElementById('detail-edit-perfume').addEventListener('click', () => {
+        const p = getSelectedPerfume();
+        if (p) openEditPerfumeModal(p);
+    });
+
+    document.getElementById('event-save').addEventListener('click', saveEventDraft);
+    document.querySelectorAll('#event-type-buttons .chip-btn').forEach(b => {
+        b.addEventListener('click', () => {
+            document.querySelectorAll('#event-type-buttons .chip-btn').forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+        });
+    });
+
+    document.getElementById('pform-save').addEventListener('click', savePerfumeDraft);
+    document.getElementById('pform-add-event').addEventListener('click', addInitialEventRow);
+
+    document.getElementById('export-copy').addEventListener('click', handleExportCopy);
+    document.getElementById('export-download').addEventListener('click', handleExportDownload);
+
+    // Extend generic close handlers to include our new modals.  We hook
+    // .modal-close directly rather than patching closeAllModals() because
+    // the existing closeAllModals() is only used from the old-modal
+    // handlers -- the .modal-close class is already wired in
+    // setupEventListeners() for every button with that class.
+    // But the modal-backdrop click was also wired; our new modals get
+    // that wiring for free because we reused the same HTML structure.
+    // Nothing extra needed here.
+}
+
+function getSelectedPerfume() {
+    if (!selectedPerfumeId) return null;
+    return perfumes.find(p => p.id === selectedPerfumeId) || null;
+}
+
+// ---------- Drafts modal ----------
+
+function openDraftsModal() {
+    renderDraftsList();
+    document.getElementById('drafts-modal').classList.remove('hidden');
+}
+
+function renderDraftsList() {
+    const container = document.getElementById('drafts-list');
+    if (!container) return;
+    if (drafts.length === 0) {
+        container.innerHTML = '<p class="drafts-empty">No drafts yet. Tap "+ Event" on a perfume, "✎ Edit" to modify one, or "+ New Perfume" below.</p>';
+        return;
+    }
+    container.innerHTML = drafts.map(d => renderDraftRow(d)).join('');
+    container.querySelectorAll('[data-action="delete-draft"]').forEach(btn => {
+        btn.addEventListener('click', () => deleteDraft(btn.dataset.tempId));
+    });
+    container.querySelectorAll('[data-action="edit-draft"]').forEach(btn => {
+        btn.addEventListener('click', () => openEditDraft(btn.dataset.tempId));
+    });
+}
+
+function renderDraftRow(draft) {
+    const kind = draft.kind;
+    const kindLabel = kind === 'new_event'    ? 'Event'
+                    : kind === 'new_perfume'  ? 'New'
+                    : kind === 'edit_perfume' ? 'Edit'
+                    : kind;
+    let title = '';
+    let detail = '';
+    if (kind === 'new_event') {
+        title = `${draft.brand_name_snapshot || ''} — ${draft.perfume_name_snapshot || '?'}`;
+        const evt = draft.event || {};
+        const parts = [evt.event_type, evt.event_date || '(today)'];
+        if (evt.outlet_name_new) parts.push('@ ' + evt.outlet_name_new);
+        else if (evt.outlet_id && outletsMap[evt.outlet_id]) {
+            parts.push('@ ' + outletsMap[evt.outlet_id].name);
+        }
+        if (evt.note) parts.push('— ' + evt.note);
+        detail = parts.join('  ');
+    } else if (kind === 'new_perfume') {
+        const data = draft.data || {};
+        const brand = data.brand_name_new || data.brand_name_snapshot || '';
+        title = `${brand} — ${data.name || '(unnamed)'}`.trim();
+        const bits = [];
+        if (data.concentration_name_new || data.concentration_name_snapshot) {
+            bits.push(data.concentration_name_new || data.concentration_name_snapshot);
+        }
+        if (data.year) bits.push(String(data.year));
+        const nTags = (data.tag_ids || []).length + (data.tag_names_new || []).length;
+        if (nTags) bits.push(`${nTags} tag(s)`);
+        const nEvents = (data.events || []).length;
+        if (nEvents) bits.push(`${nEvents} event(s)`);
+        detail = bits.join(' · ');
+    } else if (kind === 'edit_perfume') {
+        title = `${draft.brand_name_snapshot || ''} — ${draft.perfume_name_snapshot || '?'}`;
+        const nFields = Object.keys(draft.modified_fields || {}).length;
+        detail = `${nFields} field(s) modified`;
+    }
+    return `
+        <div class="draft-row">
+            <span class="draft-row-kind k-${kind}">${escapeHtml(kindLabel)}</span>
+            <div class="draft-row-body">
+                <div class="draft-row-title">${escapeHtml(title)}</div>
+                <div class="draft-row-detail">${escapeHtml(detail)}</div>
+            </div>
+            <div class="draft-row-actions">
+                <button data-action="edit-draft" data-temp-id="${escapeAttr(draft.temp_id)}" class="btn btn-secondary btn-small">Edit</button>
+                <button data-action="delete-draft" data-temp-id="${escapeAttr(draft.temp_id)}" class="btn btn-danger btn-small">Del</button>
+            </div>
+        </div>
+    `;
+}
+
+function deleteDraft(tempId) {
+    if (!confirm('Delete this draft?')) return;
+    drafts = drafts.filter(d => d.temp_id !== tempId);
+    saveDrafts();
+    renderDraftsList();
+}
+
+function handleClearAllDrafts() {
+    if (drafts.length === 0) return;
+    if (!confirm(`Delete all ${drafts.length} draft(s)? This cannot be undone.`)) return;
+    clearAllDrafts();
+    renderDraftsList();
+}
+
+function openEditDraft(tempId) {
+    const draft = drafts.find(d => d.temp_id === tempId);
+    if (!draft) return;
+    document.getElementById('drafts-modal').classList.add('hidden');
+    if (draft.kind === 'new_event') {
+        openNewEventModalForDraft(draft);
+    } else if (draft.kind === 'new_perfume') {
+        openNewPerfumeModalForDraft(draft);
+    } else if (draft.kind === 'edit_perfume') {
+        const perfume = perfumes.find(p => p.id === draft.perfume_id);
+        if (perfume) {
+            openEditPerfumeModal(perfume, draft);
+        } else {
+            alert('The original perfume no longer exists in the desktop data. You can Delete this draft.');
+            openDraftsModal();
+        }
+    }
+}
+
+// ---------- Event modal (new_event) ----------
+
+function openNewEventModal(perfume) {
+    currentEventDraftEditing = null;
+    currentEventPerfume = perfume;
+    setupEventModal({
+        title: 'Log Event',
+        perfume: perfume,
+        event: { event_type: 'smell' },
+    });
+    document.getElementById('event-modal').classList.remove('hidden');
+}
+
+function openNewEventModalForDraft(draft) {
+    const perfume = perfumes.find(p => p.id === draft.perfume_id);
+    currentEventDraftEditing = draft;
+    currentEventPerfume = perfume || null;
+    setupEventModal({
+        title: perfume ? 'Edit Event' : 'Edit Event (target missing)',
+        perfume: perfume,
+        perfumeSnapshot: perfume ? null : {
+            brand: draft.brand_name_snapshot,
+            name: draft.perfume_name_snapshot,
+        },
+        event: draft.event || {},
+    });
+    document.getElementById('event-modal').classList.remove('hidden');
+}
+
+function setupEventModal(opts) {
+    document.getElementById('event-modal-title').textContent = opts.title;
+    let head = '';
+    if (opts.perfume) {
+        const b = brandsMap[opts.perfume.brand_id] || 'Unknown';
+        head = `${b} — ${opts.perfume.name}`;
+    } else if (opts.perfumeSnapshot) {
+        const s = opts.perfumeSnapshot;
+        head = `${s.brand || ''} — ${s.name || ''}`.trim();
+    }
+    document.getElementById('event-modal-target').textContent = head;
+
+    const type = opts.event.event_type || 'smell';
+    document.querySelectorAll('#event-type-buttons .chip-btn').forEach(b => {
+        b.classList.toggle('active', b.dataset.type === type);
+    });
+    document.getElementById('event-date').value = opts.event.event_date || '';
+    const loc = opts.event.outlet_name_new
+             || (opts.event.outlet_id && outletsMap[opts.event.outlet_id]?.name)
+             || '';
+    document.getElementById('event-location').value = loc;
+    populateLocationDatalist('event-location-options');
+    document.getElementById('event-note').value = opts.event.note || '';
+}
+
+function populateLocationDatalist(datalistId) {
+    const dl = document.getElementById(datalistId);
+    if (!dl) return;
+    const names = Object.values(outletsMap).map(o => o.name).filter(Boolean).sort();
+    dl.innerHTML = names.map(n => `<option value="${escapeAttr(n)}">`).join('');
+}
+
+function saveEventDraft() {
+    const activeBtn = document.querySelector('#event-type-buttons .chip-btn.active');
+    const eventType = activeBtn ? activeBtn.dataset.type : 'smell';
+    const eventDate = document.getElementById('event-date').value;
+    const locName = document.getElementById('event-location').value.trim();
+    const note = document.getElementById('event-note').value.trim();
+
+    const eventObj = { event_type: eventType };
+    if (eventDate) eventObj.event_date = eventDate;
+    if (note) eventObj.note = note;
+    if (locName) {
+        // Resolve to an existing outlet id when the name matches exactly;
+        // otherwise carry as name_new for desktop-side create-or-match.
+        const existing = Object.entries(outletsMap).find(
+            ([id, o]) => (o.name || '') === locName
+        );
+        if (existing) eventObj.outlet_id = existing[0];
+        else eventObj.outlet_name_new = locName;
+    }
+
+    if (currentEventDraftEditing) {
+        currentEventDraftEditing.event = eventObj;
+        if (currentEventPerfume) {
+            currentEventDraftEditing.perfume_name_snapshot = currentEventPerfume.name;
+            currentEventDraftEditing.brand_name_snapshot = brandsMap[currentEventPerfume.brand_id] || '';
+        }
+    } else if (currentEventPerfume) {
+        drafts.push(makeNewEventDraft(currentEventPerfume, eventObj));
+    } else {
+        // Somehow got here without a perfume; bail rather than write a bad draft.
+        return;
+    }
+    saveDrafts();
+    document.getElementById('event-modal').classList.add('hidden');
+    renderDraftsList();  // in case drafts modal is reopened
+}
+
+// ---------- Perfume form modal (new_perfume / edit_perfume) ----------
+
+function openNewPerfumeModal() {
+    pformContext = { mode: 'new', originalPerfume: null, draft: null };
+    setupPerfumeForm({
+        title: 'New Perfume',
+        hint: 'Most fields are optional — capture what you know now, review on desktop later.',
+        data: {},
+    });
+    document.getElementById('perfume-form-modal').classList.remove('hidden');
+}
+
+function openNewPerfumeModalForDraft(draft) {
+    pformContext = { mode: 'new', originalPerfume: null, draft: draft };
+    setupPerfumeForm({
+        title: 'Edit Draft: New Perfume',
+        hint: '',
+        data: draft.data || {},
+    });
+    document.getElementById('perfume-form-modal').classList.remove('hidden');
+}
+
+function openEditPerfumeModal(perfume, existingDraft = null) {
+    pformContext = { mode: 'edit', originalPerfume: perfume, draft: existingDraft };
+    const seed = seedFromPerfume(perfume);
+    if (existingDraft && existingDraft.modified_fields) {
+        overlayModifiedFields(seed, existingDraft.modified_fields, perfume);
+    }
+    setupPerfumeForm({
+        title: 'Edit: ' + perfume.name,
+        hint: 'Only fields you actually change will be included in the export.',
+        data: seed,
+    });
+    document.getElementById('perfume-form-modal').classList.remove('hidden');
+}
+
+function seedFromPerfume(p) {
+    return {
+        name: p.name || '',
+        brand_id: p.brand_id || '',
+        brand_name_snapshot: brandsMap[p.brand_id] || '',
+        concentration_id: p.concentration_id || '',
+        concentration_name_snapshot: concentrationsMap[p.concentration_id] || '',
+        year: p.year || 0,
+        tag_ids: (p.tag_ids || []).slice(),
+        tag_names_new: [],
+        outlet_ids: (p.outlet_ids || []).slice(),
+        outlet_names_new: [],
+        my_votes: JSON.parse(JSON.stringify(p.my_votes || {})),
+        notes: (p.notes || []).map(n => ({
+            id: n.id, title: n.title || 'Note', content: n.content || ''
+        })),
+        events: [],
+        // Edit-mode "append-only note" pending state.  When reopening a
+        // draft, overlayModifiedFields fills this from mods.notes so the
+        // user can further tweak the note they were about to append.
+        // Null means "no pending append -- fresh session".
+        _pending_note: null,
+    };
+}
+
+function overlayModifiedFields(seed, mods, originalPerfume) {
+    if ('name' in mods) seed.name = mods.name || '';
+    if ('year' in mods) seed.year = mods.year || 0;
+    if ('my_votes' in mods) seed.my_votes = JSON.parse(JSON.stringify(mods.my_votes || {}));
+    if ('notes' in mods) {
+        // Edit-mode notes are append-only from mobile's perspective.  The
+        // draft stores the full replacement list, but the "new" bit is
+        // just the tail beyond the original perfume's note count.  Pull
+        // that out so setupPerfumeForm can pre-fill the append field.
+        // If the delta is 0 (e.g., desktop grew the notes list after
+        // the draft was created), we leave _pending_note null.
+        const origLen = ((originalPerfume || {}).notes || []).length;
+        const modNotes = mods.notes || [];
+        if (modNotes.length > origLen) {
+            // Take the first tail entry; if user appended more than one
+            // across sessions we only surface the first, but our current
+            // Save logic only ever appends one so this is fine in practice.
+            seed._pending_note = { ...modNotes[origLen] };
+        }
+    }
+    if ('tags' in mods) {
+        seed.tag_ids = (mods.tags.tag_ids || []).slice();
+        seed.tag_names_new = (mods.tags.tag_names_new || []).slice();
+    }
+}
+
+function setupPerfumeForm(opts) {
+    const isEdit = pformContext.mode === 'edit';
+
+    document.getElementById('pform-title').textContent = opts.title;
+    document.getElementById('pform-mode-hint').textContent = opts.hint || '';
+    const d = opts.data || {};
+
+    document.getElementById('pform-name').value = d.name || '';
+    document.getElementById('pform-brand').value = d.brand_name_new || d.brand_name_snapshot || '';
+    document.getElementById('pform-concentration').value =
+        d.concentration_name_new || d.concentration_name_snapshot || '';
+    document.getElementById('pform-year').value = d.year || '';
+
+    // Notes: mobile keeps things simple.
+    //   - new_perfume mode: the single note this new perfume ships with.
+    //     Pre-fill from d.notes[0] so reopening a draft is idempotent.
+    //   - edit_perfume mode: append-only.  Never surfaces existing notes
+    //     (avoid the "clear content = delete first note" footgun); shows
+    //     any pending append the draft has staged from a prior session.
+    const labelEl = document.getElementById('pform-note-label');
+    const hintEl = document.getElementById('pform-note-hint');
+    if (isEdit) {
+        labelEl.textContent = 'Add note (optional)';
+        const nExisting = ((pformContext.originalPerfume || {}).notes || []).length;
+        hintEl.textContent = nExisting > 0
+            ? `Appends a new note. Existing ${nExisting} note(s) are kept as-is; edit them on desktop.`
+            : 'Appends a new note. Leave blank to skip.';
+        const pending = d._pending_note;
+        document.getElementById('pform-note-title').value = pending ? (pending.title || '') : '';
+        document.getElementById('pform-note-content').value = pending ? (pending.content || '') : '';
+    } else {
+        labelEl.textContent = 'Note (optional)';
+        hintEl.textContent = '';
+        let noteTitle = '';
+        let noteContent = '';
+        if ((d.notes || []).length > 0) {
+            noteTitle = d.notes[0].title || '';
+            noteContent = d.notes[0].content || '';
+        }
+        document.getElementById('pform-note-title').value = noteTitle;
+        document.getElementById('pform-note-content').value = noteContent;
+    }
+
+    populateBrandDatalist();
+    populateConcentrationDatalist();
+
+    // Hide brand/concentration in edit mode -- desktop's edit_perfume
+    // doesn't support them, so we don't offer edits that would be lost.
+    setRowVisible(document.getElementById('pform-brand'), !isEdit);
+    setRowVisible(document.getElementById('pform-concentration'), !isEdit);
+    // Hide outlets in edit mode for the same reason.
+    document.getElementById('pform-outlets-chips').parentElement.style.display =
+        isEdit ? 'none' : '';
+    // Initial events section only makes sense for a brand-new perfume.
+    document.getElementById('pform-initial-events-wrap').style.display =
+        isEdit ? 'none' : '';
+
+    setupChipsInput(
+        'pform-tags-chips',
+        (d.tag_ids || []).map(id => tagsMap[id]).filter(Boolean),
+        (d.tag_names_new || []).slice(),
+        Object.values(tagsMap).filter(Boolean).sort(),
+    );
+    if (!isEdit) {
+        setupChipsInput(
+            'pform-outlets-chips',
+            (d.outlet_ids || []).map(id => outletsMap[id]?.name).filter(Boolean),
+            (d.outlet_names_new || []).slice(),
+            Object.values(outletsMap).map(o => o.name).filter(Boolean).sort(),
+        );
+    }
+
+    setupCompactVotes('pform-my-votes', d.my_votes || {});
+
+    if (!isEdit) {
+        pformInitialEvents = (d.events || []).slice();
+        renderPformEvents();
+    }
+}
+
+function setRowVisible(inputEl, visible) {
+    // .filter-group is the parent wrapper for form rows; hide/show it.
+    const group = inputEl.closest('.filter-group');
+    if (group) group.style.display = visible ? '' : 'none';
+}
+
+function populateBrandDatalist() {
+    const dl = document.getElementById('pform-brand-options');
+    if (!dl) return;
+    dl.innerHTML = Object.values(brandsMap).sort()
+        .map(n => `<option value="${escapeAttr(n)}">`).join('');
+}
+
+function populateConcentrationDatalist() {
+    const dl = document.getElementById('pform-concentration-options');
+    if (!dl) return;
+    dl.innerHTML = Object.values(concentrationsMap).sort()
+        .map(n => `<option value="${escapeAttr(n)}">`).join('');
+}
+
+// ---------- Chip input (tags, outlets) ----------
+
+function setupChipsInput(containerId, existingNames, newNames, candidates) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const all = [...existingNames, ...newNames];
+    container.innerHTML = '';
+    container.dataset.chips = JSON.stringify(all);
+
+    const listEl = document.createElement('div');
+    listEl.className = 'chips-input-inner';
+    listEl.style.display = 'contents';  // let flex-wrap in parent handle it
+    container.appendChild(listEl);
+    renderChips(container, listEl);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Type + Enter';
+    input.setAttribute('list', containerId + '-datalist');
+    container.appendChild(input);
+
+    // Datalist for suggestions
+    let dl = document.getElementById(containerId + '-datalist');
+    if (!dl) {
+        dl = document.createElement('datalist');
+        dl.id = containerId + '-datalist';
+        container.appendChild(dl);
+    }
+    dl.innerHTML = candidates.map(n => `<option value="${escapeAttr(n)}">`).join('');
+
+    const commit = () => {
+        const val = input.value.trim();
+        if (!val) return;
+        const current = JSON.parse(container.dataset.chips || '[]');
+        if (current.includes(val)) {
+            input.value = '';
+            return;
+        }
+        current.push(val);
+        container.dataset.chips = JSON.stringify(current);
+        input.value = '';
+        renderChips(container, listEl);
+    };
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault();
+            commit();
+        } else if (e.key === 'Backspace' && !input.value) {
+            const current = JSON.parse(container.dataset.chips || '[]');
+            if (current.length > 0) {
+                current.pop();
+                container.dataset.chips = JSON.stringify(current);
+                renderChips(container, listEl);
+            }
+        }
+    });
+    input.addEventListener('blur', commit);
+}
+
+function renderChips(container, listEl) {
+    const current = JSON.parse(container.dataset.chips || '[]');
+    // Remove existing chip elements (leave input alone).
+    Array.from(container.querySelectorAll('.chip-tag')).forEach(el => el.remove());
+    // Insert chips before the input.
+    const input = container.querySelector('input[type="text"]');
+    current.forEach((name, idx) => {
+        const chip = document.createElement('span');
+        chip.className = 'chip-tag';
+        chip.innerHTML = `${escapeHtml(name)} <button type="button" data-idx="${idx}" aria-label="Remove">×</button>`;
+        chip.querySelector('button').addEventListener('click', () => {
+            const arr = JSON.parse(container.dataset.chips || '[]');
+            arr.splice(idx, 1);
+            container.dataset.chips = JSON.stringify(arr);
+            renderChips(container, listEl);
+        });
+        if (input) container.insertBefore(chip, input);
+        else container.appendChild(chip);
+    });
+}
+
+function getChipsValues(containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return [];
+    return JSON.parse(container.dataset.chips || '[]');
+}
+
+// ---------- Compact vote UI ----------
+
+function setupCompactVotes(containerId, existingVotes) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = '';
+    COMPACT_VOTE_DIMS.forEach(dim => {
+        const row = document.createElement('div');
+        row.className = 'compact-vote-row';
+        row.dataset.dimKey = dim.key;
+
+        const label = document.createElement('div');
+        label.className = 'compact-vote-label';
+        label.textContent = dim.label;
+        row.appendChild(label);
+
+        const opts = document.createElement('div');
+        opts.className = 'compact-vote-options';
+        // Pre-existing per-option counts.  Anything >0 for an option in this
+        // dimension counts as "voted for this option"; if multiple are >0
+        // we pick the highest as the pre-selected chip.  The wire format
+        // supports counts (matching desktop), but the UI treats each
+        // dimension as "pick one" for compactness.
+        const existing = existingVotes[dim.key] || {};
+        let bestOpt = null;
+        let bestCount = 0;
+        for (const opt of dim.options) {
+            const cnt = existing[opt] || 0;
+            if (cnt > bestCount) { bestOpt = opt; bestCount = cnt; }
+        }
+        dim.options.forEach(opt => {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'compact-vote-btn';
+            btn.dataset.option = opt;
+            btn.textContent = prettyVoteLabel(opt);
+            if (opt === bestOpt) btn.classList.add('selected');
+            btn.addEventListener('click', () => {
+                const wasSelected = btn.classList.contains('selected');
+                opts.querySelectorAll('.compact-vote-btn').forEach(b =>
+                    b.classList.remove('selected'));
+                if (!wasSelected) btn.classList.add('selected');
+                // If wasSelected, tapping again clears -- gives a way to
+                // "unvote" without a separate button.
+            });
+            opts.appendChild(btn);
+        });
+        row.appendChild(opts);
+        container.appendChild(row);
+    });
+}
+
+function prettyVoteLabel(opt) {
+    // Convert 'more_male' -> 'M+', etc.  Keep short so buttons stay tight.
+    const map = {
+        'more_male':   'M+',
+        'more_female': 'F+',
+    };
+    if (map[opt]) return map[opt];
+    return opt.charAt(0).toUpperCase() + opt.slice(1);
+}
+
+function readCompactVotes(containerId) {
+    // Simple read: emit a fresh {dim: {option: 1}} for every selected chip.
+    // Used by new_perfume flow where there is no original to preserve.
+    const container = document.getElementById(containerId);
+    if (!container) return {};
+    const out = {};
+    container.querySelectorAll('.compact-vote-row').forEach(row => {
+        const dimKey = row.dataset.dimKey;
+        const selected = row.querySelector('.compact-vote-btn.selected');
+        if (selected) {
+            out[dimKey] = { [selected.dataset.option]: 1 };
+        }
+    });
+    return out;
+}
+
+function topOptionOfDim(dimVotes) {
+    let best = null;
+    let bestCnt = 0;
+    for (const [opt, cnt] of Object.entries(dimVotes || {})) {
+        if (cnt > bestCnt) { best = opt; bestCnt = cnt; }
+    }
+    return best;
+}
+
+function readCompactVotesForEdit(containerId, originalVotes) {
+    // Preserve-counts diff used by edit_perfume flow.  For each dim we
+    // compare the currently-selected chip against the "top option" of the
+    // original counts.  Same selection => keep original counts intact so
+    // we don't silently downgrade e.g. {love: 3} to {love: 1}.  Different
+    // selection (or cleared) => overwrite that dim with the new binary
+    // choice.  Returns { changed: bool, votes: merged }.
+    const container = document.getElementById(containerId);
+    const result = JSON.parse(JSON.stringify(originalVotes || {}));
+    if (!container) return { changed: false, votes: result };
+    let changed = false;
+    container.querySelectorAll('.compact-vote-row').forEach(row => {
+        const dimKey = row.dataset.dimKey;
+        const selected = row.querySelector('.compact-vote-btn.selected');
+        const origDim = (originalVotes || {})[dimKey] || {};
+        const origTop = topOptionOfDim(origDim);
+        const newTop = selected ? selected.dataset.option : null;
+        if (newTop === origTop) return;      // unchanged dim
+        changed = true;
+        if (newTop === null) delete result[dimKey];
+        else result[dimKey] = { [newTop]: 1 };
+    });
+    return { changed, votes: result };
+}
+
+// ---------- Initial events (inside new_perfume form) ----------
+
+function renderPformEvents() {
+    const wrap = document.getElementById('pform-initial-events');
+    const count = document.getElementById('pform-events-count');
+    if (!wrap) return;
+    count.textContent = `(${pformInitialEvents.length})`;
+    if (pformInitialEvents.length === 0) {
+        wrap.innerHTML = '<p class="hint">No events yet.</p>';
+        return;
+    }
+    wrap.innerHTML = pformInitialEvents.map((e, i) => {
+        const outlet = e.outlet_name_new
+                    || (e.outlet_id && outletsMap[e.outlet_id]?.name)
+                    || '';
+        const parts = [e.event_type, e.event_date || '(today)'];
+        if (outlet) parts.push('@ ' + outlet);
+        if (e.note) parts.push('— ' + e.note);
+        return `
+            <div class="initial-event-row">
+                <span class="flex-grow">${escapeHtml(parts.join('  '))}</span>
+                <button type="button" data-idx="${i}" aria-label="Remove">×</button>
+            </div>
+        `;
+    }).join('');
+    wrap.querySelectorAll('button[data-idx]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            pformInitialEvents.splice(parseInt(btn.dataset.idx, 10), 1);
+            renderPformEvents();
+        });
+    });
+}
+
+function addInitialEventRow() {
+    // Simple prompt-based capture; the full event modal is only used for
+    // adding-events-to-existing-perfumes.  Keeps the "brand new perfume"
+    // flow self-contained.
+    const type = prompt('Event type (smell / skin):', 'smell');
+    if (!type) return;
+    const eventType = type.trim().toLowerCase();
+    if (!['smell', 'skin'].includes(eventType)) {
+        alert('Type must be "smell" or "skin".');
+        return;
+    }
+    const date = prompt('Event date (YYYY-MM-DD), leave blank for today:', '');
+    const loc = prompt('Location (optional):', '');
+    const note = prompt('Note (optional):', '');
+    const evt = { event_type: eventType };
+    if (date && date.trim()) evt.event_date = date.trim();
+    if (loc && loc.trim()) {
+        const locName = loc.trim();
+        const existing = Object.entries(outletsMap).find(
+            ([id, o]) => (o.name || '') === locName);
+        if (existing) evt.outlet_id = existing[0];
+        else evt.outlet_name_new = locName;
+    }
+    if (note && note.trim()) evt.note = note.trim();
+    pformInitialEvents.push(evt);
+    renderPformEvents();
+}
+
+// ---------- Save perfume form ----------
+
+function savePerfumeDraft() {
+    const isEdit = pformContext.mode === 'edit';
+
+    const name = document.getElementById('pform-name').value.trim();
+    const brandTxt = document.getElementById('pform-brand').value.trim();
+    const concTxt = document.getElementById('pform-concentration').value.trim();
+    const yearRaw = document.getElementById('pform-year').value.trim();
+    const year = yearRaw && /^\d+$/.test(yearRaw) ? parseInt(yearRaw, 10) : 0;
+    const noteTitle = document.getElementById('pform-note-title').value.trim();
+    const noteContent = document.getElementById('pform-note-content').value.trim();
+    const tagChips = getChipsValues('pform-tags-chips');
+    const outletChips = isEdit ? [] : getChipsValues('pform-outlets-chips');
+
+    if (isEdit) {
+        // For edit we need count-preserving vote comparison; the simple
+        // reader would lose multi-vote counts on unchanged dims.
+        const origVotes = (pformContext.originalPerfume || {}).my_votes || {};
+        const voteResult = readCompactVotesForEdit('pform-my-votes', origVotes);
+        return saveEditPerfumeDraft({
+            name, year, tagChips, noteTitle, noteContent,
+            votesChanged: voteResult.changed,
+            votes: voteResult.votes,
+        });
+    }
+
+    // New-perfume flow: no history to preserve, emit binary counts.
+    const votes = readCompactVotes('pform-my-votes');
+
+    // New-perfume validation: brand + name are the minimum viable draft.
+    if (!name || !brandTxt) {
+        alert('Name and Brand are required.');
+        return;
+    }
+
+    const data = { name };
+
+    // Brand: resolve to existing id or carry as new-name
+    resolveSingleName(data, 'brand', brandTxt, brandsMap);
+    // Concentration
+    if (concTxt) {
+        resolveSingleName(data, 'concentration', concTxt, concentrationsMap);
+    }
+    if (year) data.year = year;
+
+    // Tags: partition into ids and new-names
+    const tagPart = partitionChips(tagChips, tagsMap);
+    if (tagPart.ids.length) data.tag_ids = tagPart.ids;
+    if (tagPart.namesNew.length) data.tag_names_new = tagPart.namesNew;
+    if (tagPart.snapshots.length) data.tag_names_snapshot = tagPart.snapshots;
+
+    // Outlets: partition (outletsMap has {name, region} objects, so use a
+    // name-only view).
+    const outletsByName = {};
+    for (const [id, o] of Object.entries(outletsMap)) {
+        outletsByName[id] = o.name || '';
+    }
+    const outletPart = partitionChips(outletChips, outletsByName);
+    if (outletPart.ids.length) data.outlet_ids = outletPart.ids;
+    if (outletPart.namesNew.length) data.outlet_names_new = outletPart.namesNew;
+    if (outletPart.snapshots.length) data.outlet_names_snapshot = outletPart.snapshots;
+
+    // Events
+    if (pformInitialEvents.length) {
+        data.events = pformInitialEvents.slice();
+    }
+
+    // Notes (single note supported on mobile)
+    if (noteContent) {
+        data.notes = [{ title: noteTitle || 'My Notes', content: noteContent }];
+    }
+
+    // Votes
+    if (Object.keys(votes).length) {
+        data.my_votes = votes;
+    }
+
+    if (pformContext.draft) {
+        // Overwrite in place
+        pformContext.draft.data = data;
+    } else {
+        drafts.push(makeNewPerfumeDraft(data));
+    }
+    saveDrafts();
+    document.getElementById('perfume-form-modal').classList.add('hidden');
+    renderDraftsList();
+}
+
+function saveEditPerfumeDraft(vals) {
+    const p = pformContext.originalPerfume;
+    if (!p) return;
+    const modified = {};
+
+    // name
+    if (vals.name && vals.name !== p.name) {
+        modified.name = vals.name;
+    }
+    // year
+    const origYear = p.year || 0;
+    if (vals.year !== origYear) {
+        modified.year = vals.year || 0;
+    }
+    // tags
+    const origTagIds = (p.tag_ids || []).slice().sort();
+    const tagPart = partitionChips(vals.tagChips, tagsMap);
+    const newTagIds = tagPart.ids.slice().sort();
+    const tagsChanged = origTagIds.length !== newTagIds.length
+                    || origTagIds.some((id, i) => id !== newTagIds[i])
+                    || tagPart.namesNew.length > 0;
+    if (tagsChanged) {
+        modified.tags = {
+            tag_ids: tagPart.ids,
+            tag_names_new: tagPart.namesNew,
+        };
+    }
+    // notes: append-only on mobile.  If the user typed anything in the
+    // note field, we ship the full existing list + one appended entry.
+    // Empty content => no note change of any kind.  This makes mobile
+    // Edit non-destructive w.r.t. existing notes; editing / deleting
+    // existing notes has to happen on the desktop.
+    if (vals.noteContent) {
+        modified.notes = [
+            ...(p.notes || []).map(n => ({
+                id: n.id, title: n.title || 'Note', content: n.content || ''
+            })),
+            {
+                title: vals.noteTitle || 'My Notes',
+                content: vals.noteContent,
+            },
+        ];
+    }
+    if (vals.votesChanged) {
+        modified.my_votes = vals.votes;
+    }
+
+    if (Object.keys(modified).length === 0) {
+        alert('No changes detected.');
+        return;
+    }
+
+    if (pformContext.draft) {
+        pformContext.draft.modified_fields = modified;
+        pformContext.draft.perfume_name_snapshot = p.name;
+        pformContext.draft.brand_name_snapshot = brandsMap[p.brand_id] || '';
+    } else {
+        drafts.push(makeEditPerfumeDraft(p, modified));
+    }
+    saveDrafts();
+    document.getElementById('perfume-form-modal').classList.add('hidden');
+    renderDraftsList();
+}
+
+function resolveSingleName(data, prefix, txt, idNameMap) {
+    // idNameMap: { id: name }
+    const match = Object.entries(idNameMap).find(([id, n]) => (n || '') === txt);
+    if (match) {
+        data[prefix + '_id'] = match[0];
+        data[prefix + '_name_snapshot'] = match[1];
+    } else {
+        data[prefix + '_name_new'] = txt;
+    }
+}
+
+function partitionChips(chipNames, idNameMap) {
+    // idNameMap: { id: name }
+    const ids = [];
+    const snapshots = [];
+    const namesNew = [];
+    for (const name of chipNames) {
+        const match = Object.entries(idNameMap).find(([id, n]) => (n || '') === name);
+        if (match) {
+            ids.push(match[0]);
+            snapshots.push(match[1]);
+        } else {
+            namesNew.push(name);
+        }
+    }
+    return { ids, snapshots, namesNew };
+}
+
+// ---------- Export modal ----------
+
+function openExportModal() {
+    if (drafts.length === 0) {
+        alert('No drafts to export.');
+        return;
+    }
+    const bundle = buildExportBundle();
+    document.getElementById('export-textarea').value = JSON.stringify(bundle, null, 2);
+    document.getElementById('export-modal').classList.remove('hidden');
+}
+
+function buildExportBundle() {
+    return {
+        version: DRAFTS_BUNDLE_VERSION,
+        generated_at: nowIso(),
+        generator: DRAFTS_GENERATOR,
+        drafts: drafts.slice(),  // shallow copy so post-export edits don't leak
+    };
+}
+
+function handleExportCopy() {
+    const ta = document.getElementById('export-textarea');
+    // Try the modern async clipboard first (works on Android Chrome).
+    // Fall back to the deprecated execCommand path for older WebViews.
+    const finalize = (ok) => {
+        if (ok) {
+            askToClearAfterExport();
+        } else {
+            alert('Copy failed. Select the text and copy manually.');
+        }
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(ta.value)
+            .then(() => finalize(true))
+            .catch(() => finalize(fallbackCopy(ta)));
+    } else {
+        finalize(fallbackCopy(ta));
+    }
+}
+
+function fallbackCopy(textareaEl) {
+    try {
+        textareaEl.removeAttribute('readonly');
+        textareaEl.select();
+        const ok = document.execCommand('copy');
+        textareaEl.setAttribute('readonly', 'readonly');
+        return ok;
+    } catch (e) {
+        return false;
+    }
+}
+
+function handleExportDownload() {
+    const text = document.getElementById('export-textarea').value;
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const blob = new Blob([text], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `perfume-drafts-${stamp}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    askToClearAfterExport();
+}
+
+function askToClearAfterExport() {
+    // Default is "keep", so the user has to opt in to clearing.
+    if (drafts.length === 0) return;
+    const clear = confirm(
+        `Export ready.\n\nClear all ${drafts.length} draft(s) now?\n\n` +
+        `Cancel = keep drafts (recommended until you've imported successfully on desktop).`
+    );
+    if (clear) {
+        clearAllDrafts();
+        renderDraftsList();
+        document.getElementById('export-modal').classList.add('hidden');
+    }
 }

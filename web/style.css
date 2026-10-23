@@ -1451,6 +1451,309 @@ body {
 }
 
 /* ========================================
+   Mobile Data Entry (Drafts) - Phase 2
+   All UI produced by the JS "Mobile Data Entry" section is styled here.
+   Kept in one block so future teardown is a single diff.
+   ======================================== */
+
+/* Drafts button badge */
+#drafts-btn {
+    position: relative;
+}
+.drafts-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    background: var(--accent-danger);
+    color: #fff;
+    border-radius: 9px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    line-height: 18px;
+    text-align: center;
+    pointer-events: none;
+}
+.drafts-badge.hidden {
+    display: none;
+}
+
+/* Detail-panel action row (Add Event / Edit buttons) */
+.detail-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+.btn-small {
+    padding: var(--space-xs) var(--space-sm);
+    font-size: 0.85rem;
+}
+
+/* Drafts modal */
+.drafts-toolbar {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-sm);
+    margin-bottom: var(--space-sm);
+}
+.drafts-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+}
+.drafts-empty {
+    color: var(--text-muted);
+    text-align: center;
+    padding: var(--space-md) 0;
+}
+.draft-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-sm);
+    padding: var(--space-sm);
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-light);
+}
+.draft-row-kind {
+    flex: 0 0 auto;
+    padding: 2px 6px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: var(--radius-sm);
+    background: var(--bg-hover);
+    color: var(--text-accent);
+    white-space: nowrap;
+}
+.draft-row-kind.k-new_event  { color: var(--accent-success); }
+.draft-row-kind.k-new_perfume { color: var(--accent-secondary); }
+.draft-row-kind.k-edit_perfume { color: var(--accent-warning); }
+.draft-row-body {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+.draft-row-title {
+    color: var(--text-primary);
+    font-weight: 500;
+    word-break: break-word;
+}
+.draft-row-detail {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-top: 2px;
+    word-break: break-word;
+}
+.draft-row-actions {
+    flex: 0 0 auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+/* Chips inputs (tags, outlets) */
+.chips-input {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+    padding: var(--space-xs);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    min-height: 42px;
+    align-items: center;
+}
+.chip-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    background: var(--bg-hover);
+    color: var(--text-primary);
+    border-radius: 12px;
+    font-size: 0.85rem;
+}
+.chip-tag button {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    line-height: 1;
+    font-size: 1rem;
+}
+.chip-tag button:hover {
+    color: var(--accent-danger);
+}
+.chips-input input {
+    flex: 1 1 120px;
+    min-width: 80px;
+    background: transparent;
+    border: none;
+    color: var(--text-primary);
+    padding: 4px;
+    outline: none;
+}
+
+/* Event-type chip buttons (also reused elsewhere) */
+.chip-btn {
+    padding: 6px 14px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 16px;
+    cursor: pointer;
+    font-size: 0.85rem;
+}
+.chip-btn.active {
+    background: var(--accent-primary);
+    color: #fff;
+    border-color: var(--accent-primary);
+}
+.event-type-buttons {
+    display: flex;
+    gap: var(--space-xs);
+    flex-wrap: wrap;
+}
+
+/* Compact vote UI: dimension name + 5 tap targets */
+.compact-votes {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-sm);
+    margin-top: var(--space-sm);
+}
+.compact-vote-row {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.compact-vote-label {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+.compact-vote-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+.compact-vote-btn {
+    flex: 1 1 auto;
+    min-width: 60px;
+    padding: 8px 6px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+    text-align: center;
+    line-height: 1.2;
+    transition: background 0.1s;
+}
+.compact-vote-btn.selected {
+    background: var(--accent-primary);
+    color: #fff;
+    border-color: var(--accent-primary);
+}
+
+/* Perfume form: two-column layout for concentration + year */
+.form-row {
+    display: flex;
+    gap: var(--space-md);
+    flex-wrap: wrap;
+}
+.form-col {
+    flex: 1 1 140px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.form-collapsible {
+    margin-top: var(--space-sm);
+    padding: var(--space-sm);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+.form-collapsible > summary {
+    cursor: pointer;
+    color: var(--text-primary);
+    user-select: none;
+    font-weight: 500;
+}
+.hint-inline {
+    color: var(--text-muted);
+    font-weight: normal;
+    font-size: 0.85rem;
+    margin-left: 6px;
+}
+
+/* Initial events (inside new-perfume form) */
+.initial-events-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-xs);
+    margin: var(--space-sm) 0;
+}
+.initial-event-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-sm);
+    padding: 4px 8px;
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+}
+.initial-event-row .flex-grow {
+    flex: 1 1 auto;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+.initial-event-row button {
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+/* Event target header (in event modal) */
+.event-target {
+    color: var(--text-accent);
+    padding: var(--space-sm);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    margin-bottom: var(--space-md);
+}
+
+/* Export textarea */
+#export-textarea {
+    width: 100%;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: var(--space-sm);
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 0.8rem;
+    resize: vertical;
+}
+
+/* Danger button variant */
+.btn-danger {
+    background: var(--accent-danger);
+    color: #fff;
+    border: 1px solid var(--accent-danger);
+}
+.btn-danger:hover {
+    filter: brightness(1.1);
+}
+
+/* ========================================
    Responsive Design
    ======================================== */
 
