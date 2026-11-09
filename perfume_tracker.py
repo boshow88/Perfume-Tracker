@@ -5363,6 +5363,7 @@ class MobileImportDialog(tk.Toplevel):
     def _refresh_list(self):
         for w in self.list_frame.winfo_children():
             w.destroy()
+        self._row_labels = {}
         if not self.drafts:
             ttk.Label(self.list_frame,
                       text="(no drafts loaded)",
@@ -5370,6 +5371,8 @@ class MobileImportDialog(tk.Toplevel):
             return
         for d in self.drafts:
             self._build_list_row(d)
+        # Enable mouse-wheel scrolling over the draft list.
+        self._bind_mousewheel(self._list_canvas, self.list_frame)
 
     def _build_list_row(self, draft: Dict):
         tid = draft["temp_id"]
@@ -5393,6 +5396,7 @@ class MobileImportDialog(tk.Toplevel):
         )
         lbl.pack(side="left", fill="x", expand=True)
         lbl.bind("<Button-1>", lambda e, x=tid: self._on_select_draft(x))
+        self._row_labels[tid] = lbl
 
     def _summarize_draft(self, draft: Dict) -> str:
         kind = draft["kind"]
@@ -5419,6 +5423,109 @@ class MobileImportDialog(tk.Toplevel):
             return f"[Edit] {head}\n   {n_fields} field(s) modified"
         return f"[?] Unknown draft kind {kind!r}"
 
+    def _bind_mousewheel(self, canvas, *widgets):
+        """Enable vertical mouse-wheel scrolling over ``canvas``.
+
+        Binds the handler to the canvas and every descendant of the
+        supplied widgets (skipping widgets that scroll themselves) so the
+        wheel works no matter which child the pointer is over.
+        """
+        def _on_wheel(event):
+            delta = event.delta
+            if not delta:
+                return
+            step = int(-delta / 120) or (-1 if delta > 0 else 1)
+            canvas.yview_scroll(step, "units")
+            return "break"
+
+        skip = set()
+
+        def _bind_tree(w):
+            if w.winfo_class() not in skip:
+                try:
+                    w.bind("<MouseWheel>", _on_wheel)
+                except tk.TclError:
+                    pass
+            for c in w.winfo_children():
+                _bind_tree(c)
+
+        _bind_tree(canvas)
+        for widget in widgets:
+            _bind_tree(widget)
+
+    def _full_draft_name(self, draft: Dict) -> str:
+        """Full 'Brand Name' label for a draft (brand included)."""
+        kind = draft.get("kind")
+        if kind == "new_perfume":
+            data = draft.get("data", {}) or {}
+            brand = (data.get("brand_name_snapshot")
+                     or data.get("brand_name_new") or "")
+            if not brand and data.get("brand_id"):
+                brand = self.app.get_brand_name(data["brand_id"]) or ""
+            name = data.get("name") or ""
+        else:
+            brand = draft.get("brand_name_snapshot") or ""
+            name = draft.get("perfume_name_snapshot") or ""
+        return f"{brand} {name}".strip()
+
+    @staticmethod
+    def _ro_key(event):
+        """Key handler for read-only-but-selectable Text widgets: allow
+        copy / select-all / navigation, block edits."""
+        if (event.state & 0x4) and event.keysym.lower() in ("c", "a"):
+            return
+        if event.keysym in ("Left", "Right", "Up", "Down", "Home", "End",
+                            "Prior", "Next", "Shift_L", "Shift_R",
+                            "Control_L", "Control_R"):
+            return
+        return "break"
+
+    def _make_ro_text(self, parent, text, muted=False):
+        """A read-only, selectable, word-wrapping text widget that looks like
+        a label -- so the user can highlight the content and copy it."""
+        import tkinter.font as tkfont
+        t = tk.Text(parent, wrap="word", height=1, bd=0, highlightthickness=0,
+                    bg=COLORS["panel"],
+                    fg=(COLORS.get("muted") or COLORS["text"]) if muted else COLORS["text"],
+                    cursor="xterm", font=tkfont.nametofont("TkDefaultFont"))
+        t.insert("1.0", text or "")
+        t.bind("<Key>", self._ro_key)
+
+        t._ro_last_w = -1
+        def _fit(event=None):
+            # Only recompute on an actual WIDTH change -- changing `height`
+            # itself fires <Configure>, which would otherwise loop and make
+            # the widget impossible to click/select.
+            w = t.winfo_width()
+            if w <= 1 or w == t._ro_last_w:
+                return
+            t._ro_last_w = w
+            try:
+                n = t.count("1.0", "end-1c", "displaylines")
+                lines = n[0] if isinstance(n, (tuple, list)) else int(n)
+            except Exception:
+                lines = 1
+            t.configure(height=max(1, lines))
+        t.bind("<Configure>", _fit)
+        return t
+
+    def _make_ro_entry(self, parent, text, muted=False):
+        """Read-only single-line entry -- fully selectable and copyable,
+        shown borderless so it reads like a label."""
+        import tkinter.font as tkfont
+        var = tk.StringVar(value=text or "")
+        e = tk.Entry(
+            parent, textvariable=var, state="readonly",
+            readonlybackground=COLORS["panel"], relief="flat", bd=0,
+            highlightthickness=0,
+            fg=(COLORS.get("muted") or COLORS["text"]) if muted else COLORS["text"],
+            selectbackground=(COLORS.get("accent") or "#3b6ea5"),
+            selectforeground=(COLORS.get("bg") or "#ffffff"),
+            font=tkfont.nametofont("TkDefaultFont"),
+        )
+        e._ro_var = var
+        return e
+
     def _set_all_selected(self, value: bool):
         for tid in self.resolutions:
             self.resolutions[tid]["approved"].set(value)
@@ -5438,8 +5545,15 @@ class MobileImportDialog(tk.Toplevel):
 
     def _on_select_draft(self, temp_id: str):
         self.selected_temp_id = temp_id
-        # Re-render list so highlight moves
-        self._refresh_list()
+        # Move the highlight in place.  Rebuilding the whole list would
+        # destroy the row widgets and break <Double-1> copy detection.
+        for tid, lbl in getattr(self, "_row_labels", {}).items():
+            sel = (tid == temp_id)
+            try:
+                lbl.config(bg=COLORS["accent"] if sel else COLORS["panel"],
+                           fg=COLORS["bg"] if sel else COLORS["text"])
+            except tk.TclError:
+                pass
         draft = self._get_draft(temp_id)
         if draft is None:
             self._render_detail_placeholder("Draft not found.")
@@ -5471,6 +5585,15 @@ class MobileImportDialog(tk.Toplevel):
         canvas.bind("<Configure>",
                     lambda e: canvas.itemconfig(window_id, width=e.width))
 
+        # Full "Brand Name" at the top, selectable so it can be copied.
+        full = self._full_draft_name(draft)
+        if full:
+            hdr = ttk.Frame(inner, style="TFrame")
+            hdr.pack(fill="x", padx=8, pady=(8, 0))
+            ttk.Label(hdr, text="Full name (select & Ctrl+C to copy):",
+                      style="Muted.TLabel").pack(anchor="w")
+            self._make_ro_entry(hdr, full).pack(fill="x", pady=(0, 2))
+
         if kind == "new_event":
             self._render_detail_new_event(draft, inner)
         elif kind == "new_perfume":
@@ -5480,6 +5603,9 @@ class MobileImportDialog(tk.Toplevel):
         else:
             ttk.Label(inner, text=f"Unsupported kind {kind!r}",
                       style="Muted.TLabel").pack(padx=10, pady=10)
+
+        # Enable mouse-wheel scrolling over the detail pane.
+        self._bind_mousewheel(canvas, inner)
 
     # ---- new_event ----
 
@@ -5661,9 +5787,29 @@ class MobileImportDialog(tk.Toplevel):
                 content = n.get("content") or ""
                 ttk.Label(n_frame, text=f"{title}:", style="TLabel"
                           ).pack(anchor="w", padx=4, pady=(2, 0))
-                ttk.Label(n_frame, text=content, style="Muted.TLabel",
-                          wraplength=dpi_px(480), justify="left"
-                          ).pack(anchor="w", padx=12, pady=(0, 2))
+                self._make_ro_text(n_frame, content, muted=True).pack(
+                    fill="x", padx=12, pady=(0, 2))
+
+        # Links / Fragrantica preview (shown so the parsed URLs are visible).
+        links = data.get("links") or []
+        fr_url = (data.get("fragrantica_url") or "").strip()
+        url_rows = []
+        if fr_url:
+            url_rows.append(("Fragrantica", fr_url))
+        for ln in links:
+            if not isinstance(ln, dict):
+                continue
+            url = (ln.get("url") or "").strip()
+            if url:
+                url_rows.append((ln.get("label") or "Link", url))
+        if url_rows:
+            l_frame = ttk.LabelFrame(parent, text=" Links ", style="TLabelframe")
+            l_frame.pack(fill="x", padx=8, pady=4, ipadx=6, ipady=4)
+            for label, url in url_rows:
+                ttk.Label(l_frame, text=f"{label}:", style="TLabel"
+                          ).pack(anchor="w", padx=4, pady=(2, 0))
+                self._make_ro_entry(l_frame, url, muted=True).pack(
+                    fill="x", padx=12, pady=(0, 2))
 
     # ---- edit_perfume ----
 
@@ -6808,13 +6954,15 @@ class App(tk.Tk):
 
         # Title
         # Brand (line 1)
-        self.detail_title = ttk.Label(right, text="(no selection)", style="Panel.TLabel", font=self.font_title)
+        self.detail_title = ttk.Label(right, text="(no selection)", style="Panel.TLabel", font=self.font_title, cursor="hand2")
         self.detail_title.pack(fill="x", padx=10, pady=(0, 0), anchor="w")
+        self.detail_title.bind("<Double-1>", self._copy_full_name)
         self.detail_title_tooltip = LabelTooltip(self.detail_title)
         
         # Name · Concentration (line 2)
-        self.name_conc_label = ttk.Label(right, text="", style="Panel.TLabel", font=self.font_section)
+        self.name_conc_label = ttk.Label(right, text="", style="Panel.TLabel", font=self.font_section, cursor="hand2")
         self.name_conc_label.pack(fill="x", padx=10, pady=(0, 2), anchor="w")
+        self.name_conc_label.bind("<Double-1>", self._copy_full_name)
         self.name_conc_tooltip = LabelTooltip(self.name_conc_label)
         
         # State (line 3)
@@ -7202,6 +7350,38 @@ class App(tk.Tk):
             if p.id == pid:
                 return p
         return None
+
+    def _copy_full_name(self, event=None):
+        """Double-click the brand/name in the detail panel to copy the full
+        perfume name (brand included) to the clipboard."""
+        pid = self._get_selected_id()
+        if not pid:
+            return "break"
+        p = self._get_perfume(pid)
+        if not p:
+            return "break"
+        brand = self.get_brand_name(p.brand_id) or ""
+        full = (brand + " " + p.name).strip() if brand else (p.name or "")
+        if not full:
+            return "break"
+        try:
+            self.clipboard_clear()
+            self.clipboard_append(full)
+        except Exception:
+            pass
+        # Brief visual confirmation on the widget that was double-clicked.
+        w = getattr(event, "widget", None) or self.detail_title
+        if w is self.name_conc_label:
+            restore = getattr(self, "_detail_name_conc_text", "")
+        else:
+            w = self.detail_title
+            restore = getattr(self, "_detail_brand_text", "")
+        try:
+            w.config(text="\u2713 \u5df2\u8907\u88fd\u5b8c\u6574\u54c1\u540d")
+            self.after(900, lambda: w.config(text=restore))
+        except Exception:
+            pass
+        return "break"
     
     def _move_perfume(self, direction: int):
         """Move selected perfume up (-1) or down (+1) in the manual order.
@@ -7806,6 +7986,7 @@ class App(tk.Tk):
         # Line 1: Brand
         brand_text = brand_display if brand_display else "(no brand)"
         self.detail_title.config(text=brand_text)
+        self._detail_brand_text = brand_text
         self.detail_title_tooltip.set_text(brand_text)
         
         # Line 2: Name · Concentration · Year
@@ -7817,6 +7998,7 @@ class App(tk.Tk):
             parts.append(str(p.year))
         name_conc_text = " · ".join(parts)
         self.name_conc_label.config(text=name_conc_text)
+        self._detail_name_conc_text = name_conc_text
         self.name_conc_tooltip.set_text(name_conc_text)
         
         # Line 3: State (derived from events)
@@ -9533,7 +9715,9 @@ class App(tk.Tk):
         self.app_data.perfumes[:] = [x for x in self.app_data.perfumes if x.id not in kill]
         self.tree.delete(*self.tree.get_children())
         self.detail_title.config(text="(no selection)")
+        self._detail_brand_text = "(no selection)"
         self.name_conc_label.config(text="")
+        self._detail_name_conc_text = ""
         self.state_label.config(text="")
         # Clear notes display
         for widget in self.notes_display_frame.winfo_children():
